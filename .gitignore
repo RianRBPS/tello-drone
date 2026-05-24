@@ -1,0 +1,23 @@
+# ROS 2 colcon build artifacts
+tello_ws/build/
+tello_ws/install/
+tello_ws/log/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.eggs/
+*.egg-info/
+
+# Data (large files)
+data/images/
+*.bag
+*.db3
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
