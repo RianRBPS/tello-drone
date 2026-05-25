@@ -1,0 +1,32 @@
+# Tello camera calibration
+# STATUS: UNCALIBRATED — replace with output from camera_calibration tool
+# Run: ros2 run camera_calibration cameracalibrator --size 8x6 --square 0.025 \
+#        image:=/image_raw camera:=/camera
+#
+# These are approximate values only — DO NOT use for odometry without calibrating.
+image_width: 960
+image_height: 720
+camera_name: tello
+camera_matrix:
+  rows: 3
+  cols: 3
+  data: [921.0, 0.0, 480.0,
+           0.0, 921.0, 360.0,
+           0.0,   0.0,   1.0]
+distortion_model: plumb_bob
+distortion_coefficients:
+  rows: 1
+  cols: 5
+  data: [0.0, 0.0, 0.0, 0.0, 0.0]
+rectification_matrix:
+  rows: 3
+  cols: 3
+  data: [1.0, 0.0, 0.0,
+         0.0, 1.0, 0.0,
+         0.0, 0.0, 1.0]
+projection_matrix:
+  rows: 3
+  cols: 4
+  data: [921.0, 0.0, 480.0, 0.0,
+           0.0, 921.0, 360.0, 0.0,
+           0.0,   0.0,   1.0, 0.0]
