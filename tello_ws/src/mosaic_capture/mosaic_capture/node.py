@@ -37,9 +37,14 @@ class MosaicCapture(Node):
 
         out_dir = self.get_parameter('output_dir').get_parameter_value().string_value
         if not out_dir:
-            # default: repo_root/data/images  (3 levels up from installed node)
+            # Walk up from this file until we find PLAN.md (repo root marker)
             here = os.path.dirname(os.path.abspath(__file__))
-            out_dir = os.path.join(here, '..', '..', '..', '..', '..', '..', 'data', 'images')
+            repo_root = here
+            for _ in range(12):
+                if os.path.isfile(os.path.join(repo_root, 'PLAN.md')):
+                    break
+                repo_root = os.path.dirname(repo_root)
+            out_dir = os.path.join(repo_root, 'data', 'images')
         self._out_dir = os.path.realpath(out_dir)
         os.makedirs(self._out_dir, exist_ok=True)
 
