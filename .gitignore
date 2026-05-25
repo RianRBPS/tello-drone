@@ -10,8 +10,11 @@ __pycache__/
 .eggs/
 *.egg-info/
 
-# Data (large files)
-data/images/
+# Data (large files) — keep folder structure, ignore content
+data/images/*
+!data/images/.gitkeep
+data/*.png
+data/*.jpg
 *.bag
 *.db3
 
