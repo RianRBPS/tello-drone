@@ -62,7 +62,7 @@ source ~/tello-drone/tello_ws/install/setup.bash
 
 ---
 
-### ✅ TEST 1 — Workspace builds (no drone, 5 min)
+### ✅ TEST 1 — Workspace builds ✅ PASSED 2026-05-26
 Confirms all packages are installed and importable.
 ```bash
 ros2 pkg list | grep -E "tello|mosaic|camera_info|mission"
@@ -71,7 +71,7 @@ ros2 pkg list | grep -E "tello|mosaic|camera_info|mission"
 
 ---
 
-### 🔲 TEST 2 — camera_info_publisher (no drone, 5 min)
+### ✅ TEST 2 — camera_info_publisher ✅ PASSED 2026-05-26
 Confirms the node reads the calibration YAML and re-publishes on `/camera_info`.
 ```bash
 # Terminal 1
