@@ -157,6 +157,12 @@ int ConverterRGB24::predict_size(int w, int h)
 
 
 
+void H264Decoder::flush()
+{
+  avcodec_flush_buffers(context);
+}
+
+
 std::pair<int, int> width_height(const AVFrame& f)
 {
   return std::make_pair(f.width, f.height);

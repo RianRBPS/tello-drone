@@ -72,6 +72,9 @@ bytes at frame boundaries.
   ssize_t parse(const unsigned char* in_data, ssize_t in_size);
   bool is_frame_available() const;
   const AVFrame& decode_frame();
+  /* Flush the decoder — call after dropping a corrupted sequence so the
+     codec discards its reference-frame state and resyncs on the next IDR. */
+  void flush();
 };
 
 // TODO: Rename to OutputStage or so?!
