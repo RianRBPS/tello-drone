@@ -1,0 +1,39 @@
+# mission_planner parameters
+# Edit before each flight — do NOT change during a mission.
+#
+# Grid: boustrophedon (snake) pattern starting at takeoff position.
+# Total footprint = (cols-1)*step × (rows-1)*step metres.
+# Example defaults: 3×3 grid, 1 m steps → 2×2 m area.
+
+mission_planner:
+  ros__parameters:
+
+    # ── Grid ──────────────────────────────────────────────────────────────────
+    grid_rows:    3       # number of rows
+    grid_cols:    3       # number of columns
+    grid_step_m:  1.0     # spacing between waypoints (metres)
+
+    # ── Flight ────────────────────────────────────────────────────────────────
+    altitude_m:       1.2   # target hover altitude (metres, from barometer)
+    max_speed_mps:    0.3   # global speed cap (m/s) — keep ≤ 0.5 indoors
+
+    # ── Waypoint logic ────────────────────────────────────────────────────────
+    position_tol_m:   0.25  # distance threshold to consider waypoint reached
+    settle_time_s:    1.5   # seconds to hover still before triggering capture
+
+    # ── Safety ────────────────────────────────────────────────────────────────
+    battery_land_pct: 20    # emergency land when battery drops below this %
+
+    # ── PD gains — XY (position from rtabmap odometry) ───────────────────────
+    # Increase kp_xy to correct position error faster.
+    # Increase kd_xy to damp oscillation.
+    # Keep max_xy_mps ≤ max_speed_mps.
+    kp_xy:      0.4
+    kd_xy:      0.1
+    max_xy_mps: 0.3
+
+    # ── PD gains — Z (altitude from barometer) ────────────────────────────────
+    # Barometer on Tello is noisy — keep kp_z moderate.
+    kp_z:      0.5
+    kd_z:      0.1
+    max_z_mps: 0.3

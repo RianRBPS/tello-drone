@@ -1,7 +1,7 @@
 #include "tello_driver_node.hpp"
 
 #include <libavutil/frame.h>
-#include <opencv2/highgui.hpp>
+#include <opencv2/imgproc.hpp>
 
 #include "camera_calibration_parsers/parse.hpp"
 
@@ -49,6 +49,7 @@ namespace tello_driver
 
     if (seq_buffer_next_ + r >= seq_buffer_.size()) {
       RCLCPP_ERROR(driver_->get_logger(), "Video buffer overflow, dropping sequence");
+      decoder_.flush();  // discard reference frames — resync on next IDR
       seq_buffer_next_ = 0;
       seq_buffer_num_packets_ = 0;
       return;
@@ -72,32 +73,49 @@ namespace tello_driver
   {
     size_t next = 0;
 
-    try {
-      while (next < seq_buffer_next_) {
-        // Parse h264
-        ssize_t consumed = decoder_.parse(seq_buffer_.data() + next, seq_buffer_next_ - next);
+    while (next < seq_buffer_next_) {
+      // Parse h264 — returns bytes consumed; may be 0 if parser needs more data
+      ssize_t consumed = decoder_.parse(seq_buffer_.data() + next, seq_buffer_next_ - next);
 
-        // Is a frame available?
-        if (decoder_.is_frame_available()) {
-          // Decode the frame
+      // Safety: if the parser made no progress break to avoid an infinite loop
+      if (consumed <= 0) break;
+
+      // Is a complete H264 packet (NAL unit / access unit) available?
+      if (decoder_.is_frame_available()) {
+        try {
+          // Decode the frame — throws H264DecodeFailure if got_picture == 0
+          // (legitimate for SPS/PPS NAL units or severely corrupted data)
           const AVFrame &frame = decoder_.decode_frame();
 
-          // Convert pixels from YUV420P to BGR24
+          // Skip any malformed frames with no valid dimensions
+          if (frame.width <= 0 || frame.height <= 0) {
+            next += consumed;
+            continue;
+          }
+
+          // Convert pixels from YUV420P to BGR24.
+          // Use heap allocation (std::vector) — the VLA equivalent
+          // (unsigned char bgr24[size]) was ~2 MB on the thread stack, a
+          // stack-overflow risk for a 960×720 frame.
           int size = converter_.predict_size(frame.width, frame.height);
-          unsigned char bgr24[size];
-          converter_.convert(frame, bgr24);
+          std::vector<unsigned char> bgr24(size);
+          converter_.convert(frame, bgr24.data());
 
-          // Convert to cv::Mat
-          cv::Mat mat{frame.height, frame.width, CV_8UC3, bgr24};
+          // Convert to cv::Mat (no data copy — points into bgr24)
+          cv::Mat mat{frame.height, frame.width, CV_8UC3, bgr24.data()};
 
-          // Display
-          cv::imshow("frame", mat);
-          cv::waitKey(1);
+          // Log the very first successfully decoded frame so we know decoding works
+          RCLCPP_INFO_ONCE(driver_->get_logger(),
+            "First frame decoded: %dx%d — publishing on /image_raw", frame.width, frame.height);
 
-          // Synchronize ROS messages
+          // Synchronize ROS message timestamps
           auto stamp = driver_->now();
 
-          if (driver_->count_subscribers(driver_->image_pub_->get_topic_name()) > 0) {
+          // Always publish — don't gate on subscriber count.
+          // The subscriber-count check can silently drop frames during DDS
+          // discovery (the first few hundred milliseconds after a new
+          // subscriber attaches).  The bandwidth cost on loopback is fine.
+          {
             std_msgs::msg::Header header{};
             header.frame_id = "camera_frame";
             header.stamp = stamp;
@@ -111,13 +129,19 @@ namespace tello_driver
             camera_info_msg_.header.stamp = stamp;
             driver_->camera_info_pub_->publish(camera_info_msg_);
           }
-        }
 
-        next += consumed;
+        } catch (std::runtime_error &e) {
+          // decode_frame() threw — either got_picture==0 (SPS/PPS, not a real
+          // frame) or a truly corrupted frame.  Flush the decoder so it stops
+          // trying to conceal errors against a broken reference frame and
+          // resyncs cleanly on the next IDR keyframe.
+          RCLCPP_WARN_THROTTLE(driver_->get_logger(), *driver_->get_clock(), 2000,
+            "Frame decode failed, resyncing decoder: %s", e.what());
+          decoder_.flush();
+        }
       }
-    }
-    catch (std::runtime_error e) {
-      RCLCPP_ERROR(driver_->get_logger(), e.what());
+
+      next += consumed;
     }
   }
 

@@ -392,3 +392,105 @@ export CYCLONEDDS_URI=file://$HOME/.cyclonedds.xml
 2. **Camera calibration** — fix "Cannot get camera info" error; run `camera_calibration` package with checkerboard
 3. **RViz2 setup** — subscribe to `/image_raw` and `/flight_data` for a live dashboard
 4. **First `cmd_vel` flight** — publish to `/cmd_vel` for velocity control, not just takeoff/land
+
+---
+
+## Session 5 — 2026-05-26
+
+### Goal
+Run the test checklist (Tests 1–9) from PLAN.md. Short-term project goal clarified: **manual flight → capture photos → stitch mosaic → defect/anomaly detection**. Autonomous mission deferred.
+
+### What Was Accomplished
+
+#### Code written (all pushed to GitHub)
+- ✅ GitHub repo created: https://github.com/RianRBPS/tello-drone
+- ✅ Workspace moved from `~/tello_ws` to `~/tello-drone/tello_ws` (repo root)
+- ✅ `.bashrc` updated: `source ~/tello-drone/tello_ws/install/setup.bash`
+- ✅ Phase 2 branch: `camera_info_publisher` node, `tello_calibration.yaml` placeholder, `tello_base.launch.py`
+- ✅ Phase 3 branch: `mosaic_capture` node, `stitch_mosaic.py`, smoke tests (all passing)
+- ✅ Phase 4 branch: `mission_planner` node (grid + PD controller + state machine), 22/22 unit tests
+- ✅ PLAN.md fully rewritten: new priority order, test checklist Tests 1–9, Phase 4 = defect detection (new), Phase 5 = autonomous (deferred)
+
+#### Tests run
+- ✅ **TEST 1 PASSED** — all packages visible: `camera_info_publisher`, `mission_planner`, `mosaic_capture`, `tello_*`
+- ✅ **TEST 2 PASSED** — `camera_info_publisher` reads YAML, publishes `/camera_info` at correct rate with correct values (`width: 960`, `height: 720`, `k: [921.0...]`)
+- ⚠️ **TEST 3 INCOMPLETE** — driver connected (`bat: 88`, `Receiving state`, `Receiving video`) but `/image_raw` never produced output due to H264 startup issue + WiFi dropping
+
+### Issues Encountered
+
+#### H264 decode errors at startup (normal — do not panic)
+```
+[h264] non-existing PPS 0 referenced
+[h264] decode_slice_header error
+[h264] no frame!
+[ERROR] error decoding frame
+```
+These are **normal** for the first 3–10 seconds. The H264 decoder needs one IDR/keyframe before it can output frames. They clear by themselves once the Tello sends a keyframe. `/image_raw` will not publish until after the first successful decode.
+
+#### WiFi auto-switching (root cause of Test 3 failure)
+Windows detects the Tello AP has no internet and automatically switches back to the home network after ~20 seconds, causing:
+```
+[ERROR] No state received for 5s
+[ERROR] No video received for 5s
+[ERROR] Command timed out
+```
+
+**Attempted fix (DO NOT USE):**
+```powershell
+netsh wlan set autoconfig enabled=no interface="Wi-Fi"
+```
+This disables ALL WiFi management — networks stop appearing. Required a Windows restart to recover.
+
+**Correct fix — run before each drone session:**
+```powershell
+# Prevent home network from auto-connecting (run as Administrator)
+netsh wlan set profileparameter name="YOUR_HOME_WIFI_NAME" ConnectionMode=manual
+
+# Restore after session
+netsh wlan set profileparameter name="YOUR_HOME_WIFI_NAME" ConnectionMode=auto
+```
+Replace `YOUR_HOME_WIFI_NAME` with your actual home WiFi SSID. This stops Windows from auto-jumping back but keeps WiFi working normally.
+
+#### Daemon pkill not working
+`pkill -f "ros2 daemon"` sometimes reports the daemon is "already running" after the kill. Use the stronger version:
+```bash
+pkill -9 -f "ros2 daemon" ; sleep 2 ; ros2 daemon start
+```
+
+### Current State (end of session)
+- Windows was restarted to recover WiFi (broken by the netsh autoconfig command)
+- Test 3 needs to be re-run next session with the WiFi fix applied first
+
+### Start-of-Session Checklist (updated)
+```bash
+# 1. Kill stale daemon (use -9 to be safe)
+pkill -9 -f "ros2 daemon" ; sleep 2 ; ros2 daemon start
+
+# 2. Source workspace
+source /opt/ros/humble/setup.bash
+source ~/tello-drone/tello_ws/install/setup.bash
+
+# 3. Prevent Windows from auto-switching WiFi (PowerShell as Admin)
+#    netsh wlan set profileparameter name="YOUR_HOME_WIFI" ConnectionMode=manual
+
+# 4. Switch Windows WiFi to TELLO-XXXXXX
+
+# 5. Terminal 1: start driver
+ros2 run tello_driver tello_driver_main
+# Wait for: "Receiving state" AND "Receiving video"
+# H264 errors after "Receiving video" are NORMAL — wait 10–15 seconds
+
+# 6. Terminal 2: immediately after "Receiving video" appears:
+ros2 topic hz /image_raw
+# Should show ~30 Hz within 10–15 seconds
+
+# 7. Check battery before any flight
+ros2 topic echo /flight_data   # bat: must be > 20
+```
+
+### Next Session — Resume Test 3
+1. Apply WiFi fix (PowerShell `ConnectionMode=manual`) before connecting to Tello
+2. Re-run Test 3: confirm `/image_raw` publishes at ~30 Hz
+3. Run Test 4: `camera_info_publisher` with real video
+4. Run Test 9: `mission_planner` starts in IDLE (drone on, not flying)
+5. Tests 5–8 require flying — do after Tests 3, 4, 9 pass
