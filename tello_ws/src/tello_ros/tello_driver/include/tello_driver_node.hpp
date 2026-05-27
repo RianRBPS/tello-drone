@@ -75,6 +75,14 @@ namespace tello_driver
 
     // ROS timer
     rclcpp::TimerBase::SharedPtr spin_timer_;
+
+    // True once we have sent "streamon" after connecting.
+    // The Tello may already be streaming from a previous session (both
+    // state and video sockets become active within ~175 ms of startup,
+    // before the 1-second timer fires).  Without this flag, the existing
+    // `!video_socket_->receiving()` guard would never fire and we would
+    // join the stream mid-GOP, missing the SPS+PPS+IDR needed to decode.
+    bool streamon_sent_ = false;
   };
 
   //=====================================================================================

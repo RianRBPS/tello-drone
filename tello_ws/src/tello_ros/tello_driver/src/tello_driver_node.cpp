@@ -130,8 +130,21 @@ namespace tello_driver
       return;
     }
 
+    // Always send "streamon" once after state is established, even when the
+    // Tello is already streaming.  If both sockets connect before the first
+    // timer tick (< 1 s) the old `!video_socket_->receiving()` guard below
+    // would never fire and we would join the stream mid-GOP, missing the
+    // SPS+PPS+IDR the H264 decoder needs.  Sending "streamon" makes the
+    // Tello restart its encoder from a clean keyframe.
+    if (state_socket_->receiving() && !command_socket_->waiting() && !streamon_sent_) {
+      RCLCPP_INFO(get_logger(), "Sending streamon to reset video GOP");
+      command_socket_->initiate_command("streamon", false);
+      streamon_sent_ = true;
+      return;
+    }
+
     if (state_socket_->receiving() && !video_socket_->receiving() && !command_socket_->waiting()) {
-      // Start video
+      // Re-send streamon if the video connection has dropped since startup
       command_socket_->initiate_command("streamon", false);
       return;
     }
