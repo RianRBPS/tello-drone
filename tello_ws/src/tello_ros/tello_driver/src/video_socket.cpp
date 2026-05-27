@@ -129,6 +129,19 @@ namespace tello_driver
 
           auto stamp = driver_->now();
 
+          // Rate-limit publishing to kMaxPublishHz (default 15 fps).
+          // The Tello sends 30 fps but 15 fps is plenty for mosaic capture
+          // and halves the loopback bandwidth + CPU load on WSL2.
+          if (kMaxPublishHz > 0.0) {
+            double elapsed = (stamp - last_frame_published_).seconds();
+            if (elapsed < 1.0 / kMaxPublishHz) {
+              if (consumed <= 0) break;
+              next += consumed;
+              continue;
+            }
+          }
+          last_frame_published_ = stamp;
+
           // Always publish (no subscriber-count gate — DDS discovery latency
           // can make count_subscribers() return 0 for the first few hundred ms).
           {
