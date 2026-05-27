@@ -27,7 +27,7 @@ Autonomous flight comes **after** this pipeline is proven end-to-end.
 
 ---
 
-## Current Status (2026-05-25)
+## Current Status (2026-05-27)
 
 ### What is confirmed working
 - ✅ WSL2 + ROS 2 Humble installed and verified
@@ -35,6 +35,7 @@ Autonomous flight comes **after** this pipeline is proven end-to-end.
 - ✅ `tello_driver` connects to drone, `/flight_data` at 10 Hz, `/image_raw` video
 - ✅ Takeoff and land via ROS service call (bat: 59, first flight 2026-05-19)
 - ✅ GitHub repo: https://github.com/RianRBPS/tello-drone
+- ✅ `/image_raw` video pipeline working at ~30 Hz (5 H264 decoder bugs fixed 2026-05-27)
 
 ### Code written but NOT yet tested with drone
 - 🔲 `camera_info_publisher` node (Phase 2)
@@ -87,7 +88,7 @@ ros2 topic echo /camera_info --once
 
 ---
 
-### 🔲 TEST 3 — tello_driver connects (drone on + charged)
+### ✅ TEST 3 — tello_driver connects (drone on + charged) ✅ PASSED 2026-05-27
 Re-confirm the driver still works after workspace moved.
 ```bash
 # Switch WiFi to Tello AP first
@@ -99,6 +100,13 @@ ros2 topic echo /flight_data   # confirm bat > 20
 ros2 topic echo /image_raw     # confirm video frames arriving
 ```
 **Pass:** `bat:` field shows battery %, image messages stream.
+
+**Notes:** Required 5 code fixes to unlock video (all committed):
+1. VLA `unsigned char bgr24[size]` → `std::vector<>` (stack overflow at 960×720×3)
+2. Inner try/catch — outer catch was exiting the decode loop on first SPS/PPS failure
+3. No flush on SPS/PPS decode failure — flush was wiping the parameter sets just stored
+4. Always send `streamon` on connect — driver was joining stream mid-GOP when Tello was already streaming
+5. `consumed <= 0` break moved AFTER `is_frame_available()` — buffered SPS/PPS flushed by parser (consumed==0) was being discarded before decode
 
 ---
 
