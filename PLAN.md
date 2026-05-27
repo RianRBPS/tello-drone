@@ -56,7 +56,10 @@ Autonomous flight comes **after** this pipeline is proven end-to-end.
 Each step proves the next one is worth doing.
 Run the start-of-session ritual first (every time):
 ```bash
-pkill -f "ros2 daemon" ; sleep 1 ; ros2 daemon start
+# 0. Fully quit Mullvad VPN (right-click tray → Quit) — even "disconnected" blocks UDP
+# 1. Switch Windows WiFi to TELLO-XXXXXX
+# 2. In WSL:
+pkill -9 -f "ros2 daemon" ; sleep 2 ; ros2 daemon start
 source /opt/ros/humble/setup.bash
 source ~/tello-drone/tello_ws/install/setup.bash
 ```
@@ -114,14 +117,16 @@ ros2 topic echo /image_raw     # confirm video frames arriving
 Confirms timestamps sync correctly with the real camera feed.
 ```bash
 # While tello_driver is running (Terminal 1 from Test 3):
-# Terminal 3
+# Terminal 2
 ros2 run camera_info_publisher camera_info_publisher \
   --ros-args -p calibration_file:=$HOME/tello-drone/config/tello_calibration.yaml
 
-# Terminal 4
-ros2 topic hz /camera_info   # should match /image_raw (~30 Hz)
+# Terminal 3 — wait 5 seconds before reading the rate
+ros2 topic hz /camera_info   # should be ~15 Hz (driver capped at 15 fps)
+ros2 topic hz /image_raw     # should also be ~15 Hz
 ```
-**Pass:** `/camera_info` publishes at ~30 Hz matching the video feed.
+**Pass:** `/camera_info` and `/image_raw` both publish at ~15 Hz.
+Note: driver publish rate capped at 15 fps (was 30) to prevent WSL2 CPU overload on integrated-GPU machines. Cap is `kMaxPublishHz` in `tello_driver_node.hpp`.
 
 ---
 

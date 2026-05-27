@@ -494,3 +494,128 @@ ros2 topic echo /flight_data   # bat: must be > 20
 3. Run Test 4: `camera_info_publisher` with real video
 4. Run Test 9: `mission_planner` starts in IDLE (drone on, not flying)
 5. Tests 5–8 require flying — do after Tests 3, 4, 9 pass
+
+---
+
+## Session 6 — 2026-05-27
+
+### Goal
+Fix `/image_raw` never publishing. Confirm TEST 3 with drone. Begin TEST 4.
+
+### Root Cause Investigation — 5 H264 Decoder Bugs
+
+This session was spent diagnosing and fixing a chain of bugs in `tello_driver`
+that prevented `/image_raw` from ever publishing, even with the drone connected
+and streaming. All 5 fixes are committed to the `phase-4-mission-planner` branch.
+
+#### Bug 1 — VLA stack overflow (`video_socket.cpp`)
+`unsigned char bgr24[size]` allocated ~2 MB on the thread stack at 960×720×3.
+This is a C99 VLA — not standard C++ — and risks a silent stack overflow on the
+video socket thread.
+**Fix:** Changed to `std::vector<unsigned char> bgr24(size)` (heap allocation).
+
+#### Bug 2 — Decode loop exits on first SPS/PPS failure (`video_socket.cpp`)
+`try/catch` wrapped the entire `while` loop. `decode_frame()` throws
+`H264DecodeFailure` when `got_picture == 0` — which is normal for SPS/PPS NAL
+units (parameter sets, not display frames). This exception exited the whole loop,
+silently dropping all remaining frames in the buffer.
+**Fix:** Moved `try/catch` inside the loop. One bad packet is skipped; the rest
+continue processing.
+
+#### Bug 3 — Wrong flush on SPS/PPS failure (`video_socket.cpp`)
+An earlier version of the fix called `decoder_.flush()` on every decode exception.
+`avcodec_flush_buffers` clears reference frames but NOT parameter sets — so
+flushing after an SPS/PPS packet (which stored its data in the codec context)
+would leave the codec needing a new IDR but the SPS/PPS were still intact. However,
+flushing at the wrong time could cause the next IDR to fail because of cleared
+reference state. The correct fix: do NOT flush on SPS/PPS exceptions; only flush
+on genuine buffer overflows (packet loss).
+**Fix:** Added `H264Decoder::flush()` method; call only on buffer overflow.
+
+#### Bug 4 — `streamon` never sent when Tello was already streaming (root cause)
+The timer callback sent `streamon` only when `!video_socket_->receiving()`. But
+when the Tello was already streaming from a previous WiFi session, both state and
+video sockets became active within ~175 ms of startup — before the 1-second timer
+ever fired. So `!video_socket_->receiving()` was never true when the timer checked,
+meaning `streamon` was never sent. We joined the H264 stream mid-GOP, missing the
+SPS+PPS+IDR the decoder needs.
+**Fix:** Added `streamon_sent_` flag. After state is established, always send
+`streamon` once regardless of whether video is already flowing. This resets the
+Tello encoder to a clean SPS+PPS+IDR.
+
+#### Bug 5 — `consumed <= 0` break before `is_frame_available()` check
+`av_parser_parse2` can return `consumed == 0` when it flushes a buffered NAL unit
+(SPS or PPS) without consuming new input bytes. The safety break `if (consumed <= 0) break`
+was placed before the `is_frame_available()` check, silently discarding the
+just-flushed SPS/PPS packet before it could be decoded.
+**Fix:** Moved the `consumed <= 0` break to AFTER the `is_frame_available()` block.
+(Applied as a code improvement by user review.)
+
+#### Additional fix — 15 fps publish cap
+Publishing 960×720 BGR8 at 30 fps generates ~60 MB/s on the loopback socket plus
+full H264 decode CPU on every frame. On a Surface laptop running WSL2 with
+integrated graphics, this caused the entire machine to freeze (happened twice
+this session requiring forced restarts).
+**Fix:** Added `kMaxPublishHz = 15.0` constant and `last_frame_published_`
+timestamp to `VideoSocket`. Frames beyond the rate cap are discarded before
+serialisation. Set `kMaxPublishHz = 0` to disable. 15 fps is more than enough
+for mosaic capture and visual odometry.
+
+### TEST 3 — ✅ PASSED 2026-05-27
+
+Key log lines confirming success:
+```
+[INFO] Sending streamon to reset video GOP
+[INFO] Receiving video
+[INFO] First frame decoded: 960x720 — /image_raw is live
+```
+
+Confirmed with `ros2 topic echo /image_raw --once` — returned a full 960×720
+BGR8 frame with valid pixel data.
+
+**Note:** "non-existing PPS 0 referenced" errors at startup are NORMAL. They
+appear for 1–3 seconds while the first keyframe arrives after `streamon`. The
+"First frame decoded" message confirms the pipeline is healthy.
+
+### PC Freeze — Cause and Workaround
+- Machine froze twice during this session while `tello_driver_main` ran
+- Cause: 30 fps × 2 MB/frame = 60 MB/s loopback + concealment CPU on every frame
+- Fix: 15 fps cap added (see Bug fix above)
+- If machine still feels slow: watch Task Manager → WSL `vmmem` process; if it
+  exceeds ~4 GB RAM or 80% CPU, stop the driver and let it settle
+
+### Current State (end of session)
+- ✅ TEST 3 PASSED — `/image_raw` publishing at ~15 Hz, confirmed with `echo --once`
+- 🔲 TEST 4 ready — `camera_info_publisher` + `ros2 topic hz /camera_info`
+- Machine was restarted at end of session (froze while driver was running)
+
+### Start-of-Session Checklist (updated)
+```bash
+# 1. Fully quit Mullvad VPN (right-click tray → Quit, not just disconnect)
+# 2. Switch Windows WiFi to TELLO-XXXXXX
+# 3. In WSL:
+pkill -9 -f "ros2 daemon" ; sleep 2 ; ros2 daemon start
+source /opt/ros/humble/setup.bash
+source ~/tello-drone/tello_ws/install/setup.bash
+
+# Terminal 1 — driver
+ros2 run tello_driver tello_driver_main
+# Wait for: "Sending streamon to reset video GOP"
+#           "Receiving video"
+#           "First frame decoded: 960x720"
+# Startup takes ~3–5 seconds after "Receiving video"
+
+# Terminal 2 — confirm video (wait 5 s before reading rate)
+ros2 topic hz /image_raw   # expect ~15 Hz
+```
+
+### Commits This Session
+- `Fix /image_raw never publishing: VLA stack overflow + decode loop exit on error`
+- `Fix /image_raw: always send streamon after connecting, even if already streaming`
+- `Cap video publish rate at 15 fps to prevent WSL2 CPU overload`
+
+### Next Session
+1. ✅ TEST 3 — done
+2. 🔲 TEST 4 — run `camera_info_publisher` alongside `tello_driver`, confirm `/camera_info` at ~15 Hz
+3. 🔲 TEST 9 — `mission_planner` starts in IDLE (can do with drone just powered on, no flight)
+4. 🔲 TEST 5 — camera calibration (need printed 8×6 checkerboard, 25 mm squares)
