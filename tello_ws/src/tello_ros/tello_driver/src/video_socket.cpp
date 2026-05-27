@@ -90,10 +90,7 @@ namespace tello_driver
           // Convert to cv::Mat
           cv::Mat mat{frame.height, frame.width, CV_8UC3, bgr24};
 
-          // Display
-          cv::imshow("frame", mat);
-          cv::waitKey(1);
-
+          // Display window removed — publish via ROS only (imshow caused WSLg CPU spike)
           // Synchronize ROS messages
           auto stamp = driver_->now();
 
