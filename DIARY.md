@@ -619,3 +619,65 @@ ros2 topic hz /image_raw   # expect ~15 Hz
 2. 🔲 TEST 4 — run `camera_info_publisher` alongside `tello_driver`, confirm `/camera_info` at ~15 Hz
 3. 🔲 TEST 9 — `mission_planner` starts in IDLE (can do with drone just powered on, no flight)
 4. 🔲 TEST 5 — camera calibration (need printed 8×6 checkerboard, 25 mm squares)
+
+---
+
+## Orientador — Feedback 2026-05-27
+
+### Contexto
+Reunião com orientador durante a sessão 6. Feedback sobre arquitetura e direção do projeto.
+
+### Pontos levantados
+
+#### 1 — Usar tentone/tello-ros2 como base
+O orientador indicou o repositório **https://github.com/tentone/tello-ros2** como base
+do driver em vez do `clydemcqueen/tello_ros` atual.
+
+O tentone já publica todos os tópicos necessários sem nós extras:
+- `/image_raw` — câmera 30 Hz
+- `/camera_info` — calibração 2 Hz (já incluso — sem precisar do `camera_info_publisher`)
+- `/imu` — aceleração e giroscópio 10 Hz
+- `/odom` — posição estimada 10 Hz (sem precisar do rtabmap)
+- `/tf` — transforms 10 Hz
+- `/battery_state` — bateria 2 Hz
+
+**Ação:** testar se o tentone builda no ROS 2 Humble (foi feito para Foxy).
+
+#### 2 — Projeto tem código demais
+O orientador observou que o repositório atual tem muito código (driver C++ com patches,
+`camera_info_publisher`, `mission_planner`, scripts de teste) o que complica o projeto.
+
+A visão correta é:
+- Driver externo (tentone ou clydemcqueen) — clonado, não modificado, não entra no repo
+- **Um único nó Python** escrito pelo aluno que faz subscribe dos tópicos e implementa
+  a contribuição do projeto: captura → mosaico → detecção de defeitos
+
+#### 3 — ros2 bag para desenvolvimento offline
+O orientador recomendou usar **ros2 bag** para gravar uma sessão com o drone e depois
+desenvolver e testar todos os nós sem precisar ligar o drone novamente.
+
+Fluxo:
+```
+1. Ligar drone uma vez → ros2 bag record → gravar /image_raw /odom /imu /camera_info
+2. Desligar drone
+3. ros2 bag play → reproduz o experimento completo
+4. Desenvolver e iterar sobre o nó customizado com o bag
+```
+
+**Benefício:** uma sessão de voo libera semanas de desenvolvimento offline.
+
+#### 4 — Acesso aos dados via subscribe
+Confirmação de que o aluno não precisa se preocupar com UDP, H264, sockets — o driver
+já faz tudo isso. O trabalho do projeto é criar um nó que faz subscribe de `/image_raw`
+e `/odom` e implementa a lógica de inspeção.
+
+#### 5 — Visualização no RViz
+Recomendação de configurar o RViz para visualizar câmera, IMU e odometria do tentone
+antes de começar a escrever o nó customizado — confirma que todos os dados chegam
+corretamente.
+
+### Ações definidas
+- 🔲 Testar `tentone/tello-ros2` no ROS 2 Humble
+- 🔲 Ligar drone + gravar bag (TEST 10) — prioridade alta
+- 🔲 Avaliar se `camera_info_publisher` e `mission_planner` podem ser removidos do repo
+- 🔲 Simplificar estrutura do repo para: driver (externo) + 1 nó customizado
