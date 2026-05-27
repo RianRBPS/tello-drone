@@ -29,13 +29,21 @@ Autonomous flight comes **after** this pipeline is proven end-to-end.
 
 ## Current Status (2026-05-27)
 
+### Orientação do professor (2026-05-27)
+- Usar **https://github.com/tentone/tello-ros2** como base do driver — já publica
+  `/image_raw`, `/camera_info`, `/imu`, `/odom`, `/tf` sem precisar de nós extras
+- Gravar **ros2 bag** na primeira sessão com drone → desenvolver tudo offline depois
+- O projeto deve ser **um único nó customizado** que faz subscribe dos tópicos do driver
+  e implementa: captura → mosaico → detecção de defeitos
+- 🔲 Migrar de `clydemcqueen/tello_ros` para `tentone/tello-ros2` (verificar compatibilidade Humble)
+
 ### What is confirmed working
 - ✅ WSL2 + ROS 2 Humble installed and verified
 - ✅ `tello_ros` built (3 build errors fixed and committed)
 - ✅ `tello_driver` connects to drone, `/flight_data` at 10 Hz, `/image_raw` video
 - ✅ Takeoff and land via ROS service call (bat: 59, first flight 2026-05-19)
 - ✅ GitHub repo: https://github.com/RianRBPS/tello-drone
-- ✅ `/image_raw` video pipeline working at ~30 Hz (5 H264 decoder bugs fixed 2026-05-27)
+- ✅ `/image_raw` video pipeline working at ~15 Hz (5 H264 decoder bugs fixed 2026-05-27)
 
 ### Code written but NOT yet tested with drone
 - 🔲 `camera_info_publisher` node (Phase 2)
@@ -198,6 +206,39 @@ ros2 topic echo /mission_status   # should print: IDLE — call /tello_action ta
 ros2 topic echo /cmd_vel          # should be SILENT (no velocity commands in IDLE)
 ```
 **Pass:** Status = IDLE, no `/cmd_vel` messages published.
+
+---
+
+### 🔲 TEST 10 — Gravar ros2 bag (drone ligado, voando manualmente)
+Grava todas as mensagens do experimento para reprodução offline.
+Após este teste o drone **não precisa mais ser ligado** para desenvolver e testar nós.
+
+```bash
+# Com o driver rodando (Terminal 1), gravar em Terminal 2:
+ros2 bag record /image_raw /flight_data /camera_info /tf -o ~/tello-drone/data/bags/voo_01
+
+# Voar manualmente por 30–60 segundos cobrindo a área de inspeção
+# Ctrl-C para parar a gravação
+
+# Verificar o bag gerado:
+ros2 bag info ~/tello-drone/data/bags/voo_01
+```
+
+**Pass:** Bag criado com pelo menos `/image_raw` e `/flight_data`. Tamanho esperado: ~50–100 MB por minuto de voo.
+
+#### Reproduzir o bag (sem drone, sem WiFi)
+```bash
+# Terminal 1 — reproduz todas as mensagens gravadas
+ros2 bag play ~/tello-drone/data/bags/voo_01
+
+# Terminal 2 — seu nó processa como se o drone estivesse ao vivo
+ros2 run mosaic_capture mosaic_capture
+
+# Terminal 3 — visualizar
+ros2 run rqt_image_view rqt_image_view
+```
+
+**Benefício:** Desenvolva e teste `mosaic_capture`, `defect_detector` e qualquer outro nó sem ligar o drone.
 
 ---
 
