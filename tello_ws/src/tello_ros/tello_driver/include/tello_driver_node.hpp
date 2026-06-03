@@ -75,6 +75,14 @@ namespace tello_driver
 
     // ROS timer
     rclcpp::TimerBase::SharedPtr spin_timer_;
+
+    // True once we have sent "streamon" after connecting.
+    // The Tello may already be streaming from a previous session (both
+    // state and video sockets become active within ~175 ms of startup,
+    // before the 1-second timer fires).  Without this flag, the existing
+    // `!video_socket_->receiving()` guard would never fire and we would
+    // join the stream mid-GOP, missing the SPS+PPS+IDR needed to decode.
+    bool streamon_sent_ = false;
   };
 
   //=====================================================================================
@@ -184,6 +192,12 @@ namespace tello_driver
     ConverterRGB24 converter_;                // Converts pixels from YUV420P to BGR24
 
     sensor_msgs::msg::CameraInfo camera_info_msg_;
+
+    // Publish rate cap — keeps CPU/WSL2 load manageable on integrated-GPU machines.
+    // The Tello sends 30 fps but mosaic capture only needs ~1–5 fps.
+    // Set to 0.0 to disable throttling and publish every decoded frame.
+    static constexpr double kMaxPublishHz = 15.0;
+    rclcpp::Time last_frame_published_{0, 0, RCL_ROS_TIME};
   };
 
 } // namespace tello_driver

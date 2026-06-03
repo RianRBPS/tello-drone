@@ -27,7 +27,15 @@ Autonomous flight comes **after** this pipeline is proven end-to-end.
 
 ---
 
-## Current Status (2026-05-25)
+## Current Status (2026-05-27)
+
+### Orientação do professor (2026-05-27)
+- Usar **https://github.com/tentone/tello-ros2** como base do driver — já publica
+  `/image_raw`, `/camera_info`, `/imu`, `/odom`, `/tf` sem precisar de nós extras
+- Gravar **ros2 bag** na primeira sessão com drone → desenvolver tudo offline depois
+- O projeto deve ser **um único nó customizado** que faz subscribe dos tópicos do driver
+  e implementa: captura → mosaico → detecção de defeitos
+- 🔲 Migrar de `clydemcqueen/tello_ros` para `tentone/tello-ros2` (verificar compatibilidade Humble)
 
 ### What is confirmed working
 - ✅ WSL2 + ROS 2 Humble installed and verified
@@ -35,6 +43,7 @@ Autonomous flight comes **after** this pipeline is proven end-to-end.
 - ✅ `tello_driver` connects to drone, `/flight_data` at 10 Hz, `/image_raw` video
 - ✅ Takeoff and land via ROS service call (bat: 59, first flight 2026-05-19)
 - ✅ GitHub repo: https://github.com/RianRBPS/tello-drone
+- ✅ `/image_raw` video pipeline working at ~15 Hz (5 H264 decoder bugs fixed 2026-05-27)
 
 ### Code written but NOT yet tested with drone
 - 🔲 `camera_info_publisher` node (Phase 2)
@@ -55,7 +64,10 @@ Autonomous flight comes **after** this pipeline is proven end-to-end.
 Each step proves the next one is worth doing.
 Run the start-of-session ritual first (every time):
 ```bash
-pkill -f "ros2 daemon" ; sleep 1 ; ros2 daemon start
+# 0. Fully quit Mullvad VPN (right-click tray → Quit) — even "disconnected" blocks UDP
+# 1. Switch Windows WiFi to TELLO-XXXXXX
+# 2. In WSL:
+pkill -9 -f "ros2 daemon" ; sleep 2 ; ros2 daemon start
 source /opt/ros/humble/setup.bash
 source ~/tello-drone/tello_ws/install/setup.bash
 ```
@@ -87,7 +99,7 @@ ros2 topic echo /camera_info --once
 
 ---
 
-### 🔲 TEST 3 — tello_driver connects (drone on + charged)
+### ✅ TEST 3 — tello_driver connects (drone on + charged) ✅ PASSED 2026-05-27
 Re-confirm the driver still works after workspace moved.
 ```bash
 # Switch WiFi to Tello AP first
@@ -100,20 +112,29 @@ ros2 topic echo /image_raw     # confirm video frames arriving
 ```
 **Pass:** `bat:` field shows battery %, image messages stream.
 
+**Notes:** Required 5 code fixes to unlock video (all committed):
+1. VLA `unsigned char bgr24[size]` → `std::vector<>` (stack overflow at 960×720×3)
+2. Inner try/catch — outer catch was exiting the decode loop on first SPS/PPS failure
+3. No flush on SPS/PPS decode failure — flush was wiping the parameter sets just stored
+4. Always send `streamon` on connect — driver was joining stream mid-GOP when Tello was already streaming
+5. `consumed <= 0` break moved AFTER `is_frame_available()` — buffered SPS/PPS flushed by parser (consumed==0) was being discarded before decode
+
 ---
 
 ### 🔲 TEST 4 — camera_info_publisher with real video (drone on)
 Confirms timestamps sync correctly with the real camera feed.
 ```bash
 # While tello_driver is running (Terminal 1 from Test 3):
-# Terminal 3
+# Terminal 2
 ros2 run camera_info_publisher camera_info_publisher \
   --ros-args -p calibration_file:=$HOME/tello-drone/config/tello_calibration.yaml
 
-# Terminal 4
-ros2 topic hz /camera_info   # should match /image_raw (~30 Hz)
+# Terminal 3 — wait 5 seconds before reading the rate
+ros2 topic hz /camera_info   # should be ~15 Hz (driver capped at 15 fps)
+ros2 topic hz /image_raw     # should also be ~15 Hz
 ```
-**Pass:** `/camera_info` publishes at ~30 Hz matching the video feed.
+**Pass:** `/camera_info` and `/image_raw` both publish at ~15 Hz.
+Note: driver publish rate capped at 15 fps (was 30) to prevent WSL2 CPU overload on integrated-GPU machines. Cap is `kMaxPublishHz` in `tello_driver_node.hpp`.
 
 ---
 
@@ -185,6 +206,39 @@ ros2 topic echo /mission_status   # should print: IDLE — call /tello_action ta
 ros2 topic echo /cmd_vel          # should be SILENT (no velocity commands in IDLE)
 ```
 **Pass:** Status = IDLE, no `/cmd_vel` messages published.
+
+---
+
+### 🔲 TEST 10 — Gravar ros2 bag (drone ligado, voando manualmente)
+Grava todas as mensagens do experimento para reprodução offline.
+Após este teste o drone **não precisa mais ser ligado** para desenvolver e testar nós.
+
+```bash
+# Com o driver rodando (Terminal 1), gravar em Terminal 2:
+ros2 bag record /image_raw /flight_data /camera_info /tf -o ~/tello-drone/data/bags/voo_01
+
+# Voar manualmente por 30–60 segundos cobrindo a área de inspeção
+# Ctrl-C para parar a gravação
+
+# Verificar o bag gerado:
+ros2 bag info ~/tello-drone/data/bags/voo_01
+```
+
+**Pass:** Bag criado com pelo menos `/image_raw` e `/flight_data`. Tamanho esperado: ~50–100 MB por minuto de voo.
+
+#### Reproduzir o bag (sem drone, sem WiFi)
+```bash
+# Terminal 1 — reproduz todas as mensagens gravadas
+ros2 bag play ~/tello-drone/data/bags/voo_01
+
+# Terminal 2 — seu nó processa como se o drone estivesse ao vivo
+ros2 run mosaic_capture mosaic_capture
+
+# Terminal 3 — visualizar
+ros2 run rqt_image_view rqt_image_view
+```
+
+**Benefício:** Desenvolva e teste `mosaic_capture`, `defect_detector` e qualquer outro nó sem ligar o drone.
 
 ---
 

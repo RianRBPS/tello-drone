@@ -13,9 +13,20 @@ namespace tello_driver
   // -- frames are split into UDP packets of length 1460.
   // -- normal frames are ~10k, or about 8 UDP packets.
   // -- keyframes are ~35k, or about 25 UDP packets.
-  // -- keyframes are always preceded by an 8-byte UDP packet and a 13-byte UDP packet -- markers?
-  // -- the h264 parser will consume the 8-byte packet, the 13-byte packet and the entire keyframe without
-  //    generating a frame. Presumably the keyframe is stored in the parser and referenced later.
+  // -- keyframes are always preceded by an 8-byte UDP packet and a 13-byte UDP packet.
+  //    These are the SPS (type 7) and PPS (type 8) NAL units sent as small stand-alone
+  //    UDP packets, each of which triggers an immediate decode_frames() call.
+  // -- the h264 parser will consume the 8-byte packet and the 13-byte packet without
+  //    generating a packet (pkt->size == 0), storing the NAL units in its internal
+  //    buffer.  When the NEXT NAL start-code arrives (in the IDR sequence), the parser
+  //    flushes the buffered NAL as an output packet with consumed == 0.
+  //
+  // Critical decode-loop ordering rule:
+  //   av_parser_parse2 can return consumed == 0 when it flushes a buffered packet
+  //   (e.g. SPS or PPS) without consuming any new input bytes.
+  //   The "safety break on consumed <= 0" MUST come AFTER the is_frame_available()
+  //   check, not before — otherwise the flushed SPS/PPS packet is silently discarded
+  //   and the decoder context never gets the parameter sets it needs to decode IDR/P.
 
   VideoSocket::VideoSocket(TelloDriverNode *driver, unsigned short video_port, const std::string &camera_info_path) :
     TelloSocket(driver, video_port)
@@ -49,7 +60,9 @@ namespace tello_driver
 
     if (seq_buffer_next_ + r >= seq_buffer_.size()) {
       RCLCPP_ERROR(driver_->get_logger(), "Video buffer overflow, dropping sequence");
-      decoder_.flush();  // discard reference frames — resync on next IDR
+      // Genuine packet loss — the current keyframe is unrecoverable.
+      // Flush the decoder so it resyncs on the next IDR.
+      decoder_.flush();
       seq_buffer_next_ = 0;
       seq_buffer_num_packets_ = 0;
       return;
@@ -74,47 +87,63 @@ namespace tello_driver
     size_t next = 0;
 
     while (next < seq_buffer_next_) {
-      // Parse h264 — returns bytes consumed; may be 0 if parser needs more data
+      // Parse one NAL unit from the buffer.
+      // consumed == 0 is valid: the parser can flush a previously buffered
+      // packet (SPS or PPS) without consuming any new input bytes.
       ssize_t consumed = decoder_.parse(seq_buffer_.data() + next, seq_buffer_next_ - next);
 
-      // Safety: if the parser made no progress break to avoid an infinite loop
-      if (consumed <= 0) break;
-
-      // Is a complete H264 packet (NAL unit / access unit) available?
+      // Process any available packet BEFORE checking consumed.
+      // If we check consumed <= 0 first and break, a buffered SPS/PPS packet
+      // that was just flushed (with consumed == 0) would be silently dropped,
+      // leaving the decoder without the parameter sets it needs for IDR/P frames.
       if (decoder_.is_frame_available()) {
         try {
-          // Decode the frame — throws H264DecodeFailure if got_picture == 0
-          // (legitimate for SPS/PPS NAL units or severely corrupted data)
+          // Decode the packet.
+          // SPS (type 7) and PPS (type 8) NAL units return got_picture == 0,
+          // causing decode_frame() to throw H264DecodeFailure.  This is
+          // expected and correct — the codec stores the parameter sets and
+          // produces no display picture.  Do NOT flush on this error.
           const AVFrame &frame = decoder_.decode_frame();
 
-          // Skip any malformed frames with no valid dimensions
+          // Skip malformed frames with no valid dimensions
           if (frame.width <= 0 || frame.height <= 0) {
+            // Not a displayable frame (likely a pure parameter-set packet
+            // that somehow returned got_picture==1).  Advance and continue.
+            if (consumed <= 0) break;
             next += consumed;
             continue;
           }
 
-          // Convert pixels from YUV420P to BGR24.
-          // Use heap allocation (std::vector) — the VLA equivalent
-          // (unsigned char bgr24[size]) was ~2 MB on the thread stack, a
-          // stack-overflow risk for a 960×720 frame.
+          // Convert YUV420P → BGR24 using heap allocation.
+          // The original VLA "unsigned char bgr24[size]" put ~2 MB on the
+          // thread stack at 960×720, risking a stack overflow.
           int size = converter_.predict_size(frame.width, frame.height);
           std::vector<unsigned char> bgr24(size);
           converter_.convert(frame, bgr24.data());
 
-          // Convert to cv::Mat (no data copy — points into bgr24)
+          // cv::Mat wraps bgr24 without copying
           cv::Mat mat{frame.height, frame.width, CV_8UC3, bgr24.data()};
 
-          // Log the very first successfully decoded frame so we know decoding works
           RCLCPP_INFO_ONCE(driver_->get_logger(),
-            "First frame decoded: %dx%d — publishing on /image_raw", frame.width, frame.height);
+            "First frame decoded: %dx%d — /image_raw is live", frame.width, frame.height);
 
-          // Synchronize ROS message timestamps
           auto stamp = driver_->now();
 
-          // Always publish — don't gate on subscriber count.
-          // The subscriber-count check can silently drop frames during DDS
-          // discovery (the first few hundred milliseconds after a new
-          // subscriber attaches).  The bandwidth cost on loopback is fine.
+          // Rate-limit publishing to kMaxPublishHz (default 15 fps).
+          // The Tello sends 30 fps but 15 fps is plenty for mosaic capture
+          // and halves the loopback bandwidth + CPU load on WSL2.
+          if (kMaxPublishHz > 0.0) {
+            double elapsed = (stamp - last_frame_published_).seconds();
+            if (elapsed < 1.0 / kMaxPublishHz) {
+              if (consumed <= 0) break;
+              next += consumed;
+              continue;
+            }
+          }
+          last_frame_published_ = stamp;
+
+          // Always publish (no subscriber-count gate — DDS discovery latency
+          // can make count_subscribers() return 0 for the first few hundred ms).
           {
             std_msgs::msg::Header header{};
             header.frame_id = "camera_frame";
@@ -131,16 +160,17 @@ namespace tello_driver
           }
 
         } catch (std::runtime_error &e) {
-          // decode_frame() threw — either got_picture==0 (SPS/PPS, not a real
-          // frame) or a truly corrupted frame.  Flush the decoder so it stops
-          // trying to conceal errors against a broken reference frame and
-          // resyncs cleanly on the next IDR keyframe.
-          RCLCPP_WARN_THROTTLE(driver_->get_logger(), *driver_->get_clock(), 2000,
-            "Frame decode failed, resyncing decoder: %s", e.what());
-          decoder_.flush();
+          // got_picture == 0: normal for SPS/PPS NAL units.
+          // The parameter sets were stored in the codec — do NOT flush.
+          RCLCPP_DEBUG(driver_->get_logger(),
+            "No picture from packet (SPS/PPS or partial): %s", e.what());
         }
       }
 
+      // Safety: if the parser made no progress AND has no buffered output,
+      // break to prevent an infinite loop.  This check must come AFTER the
+      // is_frame_available() block above.
+      if (consumed <= 0) break;
       next += consumed;
     }
   }
