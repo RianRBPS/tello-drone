@@ -749,3 +749,52 @@ Janelas do WSLg aparecem na barra de tarefas mas não podem ser clicadas.
 2. Gravar ros2 bag com drone voando manualmente (TEST 10)
 3. Criar nó Python customizado que faz subscribe de `/image_raw` e `/odom`
 4. Testar o nó reproduzindo o bag offline — sem precisar ligar o drone
+
+---
+
+## Orientador — Feedback 2026-05-27 (segunda reunião)
+
+### ros2 bag — prioridade alta
+
+O orientador reforçou a importância de gravar um **ros2 bag** o quanto antes.
+
+**Motivação principal:** com o bag gravado, o orientador também consegue acessar
+o arquivo no sistema dele e ver exatamente o que o drone está transmitindo —
+facilita a supervisão e o desenvolvimento colaborativo sem precisar do drone físico.
+
+**Referência enviada pelo orientador:**
+https://wiki.ros.org/rosbag/Commandline
+
+### Como funciona
+
+O bag é um arquivo compactado (tipo zip) que contém todas as mensagens trafegadas
+na rede ROS durante a gravação. Depois é possível dar `ros2 bag play` e o sistema
+se comporta exatamente como se o drone estivesse ligado.
+
+**Gravar** — abre um terminal novo enquanto o driver está rodando:
+```bash
+ros2 bag record -a -o ~/tello-drone/data/bags/voo_01
+# -a = grava TODOS os tópicos
+# Ctrl-C para parar
+```
+
+**Reproduzir** — sem drone, sem WiFi:
+```bash
+ros2 bag play ~/tello-drone/data/bags/voo_01
+```
+
+### Gravar a tela durante os testes
+
+O orientador pediu para **gravar a tela** durante as próximas sessões de teste
+para que ele possa acompanhar os erros que estão acontecendo sem precisar estar
+presente. A gravação deve mostrar os terminais com os logs do driver e os erros
+que aparecem em tempo real.
+
+Ferramentas sugeridas para gravação de tela no Windows 11:
+- **Xbox Game Bar**: `Win + G` → botão de gravação (gratuito, já instalado)
+- **OBS Studio**: mais completo, permite gravar múltiplos terminais
+
+### Ações definidas
+- 🔲 Ligar drone → **gravar tela** + gravar bag com `ros2 bag record -a` — **prioridade máxima**
+- 🔲 Compartilhar gravação de tela e bag com orientador
+- 🔲 Desenvolver e testar nó customizado reproduzindo o bag offline
