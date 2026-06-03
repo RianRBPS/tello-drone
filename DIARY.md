@@ -783,7 +783,18 @@ ros2 bag record -a -o ~/tello-drone/data/bags/voo_01
 ros2 bag play ~/tello-drone/data/bags/voo_01
 ```
 
+### Gravar a tela durante os testes
+
+O orientador pediu para **gravar a tela** durante as próximas sessões de teste
+para que ele possa acompanhar os erros que estão acontecendo sem precisar estar
+presente. A gravação deve mostrar os terminais com os logs do driver e os erros
+que aparecem em tempo real.
+
+Ferramentas sugeridas para gravação de tela no Windows 11:
+- **Xbox Game Bar**: `Win + G` → botão de gravação (gratuito, já instalado)
+- **OBS Studio**: mais completo, permite gravar múltiplos terminais
+
 ### Ações definidas
-- 🔲 Ligar drone → gravar bag com `ros2 bag record -a` — **prioridade máxima**
-- 🔲 Compartilhar bag com orientador
+- 🔲 Ligar drone → **gravar tela** + gravar bag com `ros2 bag record -a` — **prioridade máxima**
+- 🔲 Compartilhar gravação de tela e bag com orientador
 - 🔲 Desenvolver e testar nó customizado reproduzindo o bag offline
