@@ -681,3 +681,73 @@ corretamente.
 - 🔲 Ligar drone + gravar bag (TEST 10) — prioridade alta
 - 🔲 Avaliar se `camera_info_publisher` e `mission_planner` podem ser removidos do repo
 - 🔲 Simplificar estrutura do repo para: driver (externo) + 1 nó customizado
+
+---
+
+## Session 7 — 2026-05-27 (continuação)
+
+### Goal
+Implementar a arquitetura sugerida pelo orientador:
+driver externo (tentone/tello-ros2) + um único nó Python customizado.
+
+### O que foi feito
+
+#### 1 — tentone/tello-ros2 buildado no ROS 2 Humble ✅
+Clonado de https://github.com/tentone/tello-ros2 e buildado com sucesso.
+Dependências Python necessárias:
+```bash
+pip3 install av djitellopy numpy opencv-python
+pip3 install "numpy<2"   # downgrade necessário — NumPy 2.x incompatível com cv_bridge do Humble
+```
+
+Tópicos publicados pelo driver (confirmado com `ros2 topic list`):
+```
+/battery        /camera_info    /control        /emergency
+/flip           /id             /image_raw      /imu
+/land           /odom           /status         /takeoff
+/temperature    /wifi_config
+```
+
+Driver conectou ao drone com sucesso:
+```
+Response command: 'ok'
+Connected to drone
+Response streamon: 'ok'
+Driver node ready
+```
+
+#### 2 — tello_inspection node criado ✅
+Nó único Python em `tello_ws/src/tello_inspection/tello_inspection/node.py`.
+Faz subscribe de `/image_raw` e `/odom`, salva frames + poses.csv.
+Parâmetros: `output_dir`, `trigger_dist_m`, `save_all`.
+
+#### 3 — RViz aberto ✅
+WSLg bug ([WARN:COPY MODE]) resolvido com `wsl --shutdown` no PowerShell.
+RViz abrindo a 31 fps via WSLg.
+
+![RViz com tópicos do tentone](docs/screenshots/rviz_topics_tentone.png)
+
+### Issues encontrados
+
+#### NumPy 2.x incompatível com cv_bridge
+O tentone instala NumPy 2.x que quebra o cv_bridge do ROS 2 Humble:
+```
+AttributeError: _ARRAY_API not found
+```
+**Fix:** `pip3 install "numpy<2"`
+
+#### WSLg WARN:COPY MODE
+Janelas do WSLg aparecem na barra de tarefas mas não podem ser clicadas.
+**Fix:** `wsl --shutdown` no PowerShell do Windows + reabrir WSL.
+
+### Estado atual
+- ✅ tentone/tello-ros2 rodando no Humble
+- ✅ Drone conectado, todos os tópicos publicando
+- ✅ RViz aberto
+- 🔲 Adicionar câmera + odometria no RViz
+- 🔲 Gravar ros2 bag (TEST 10)
+
+### Próximos passos
+1. Adicionar `/image_raw` no RViz (Add → By topic → /image_raw → Image)
+2. Gravar bag com drone voando manualmente
+3. Desenvolver `tello_inspection` node usando o bag offline
