@@ -716,12 +716,6 @@ Response streamon: 'ok'
 Driver node ready
 ```
 
-#### 2 — tello_inspection node criado (não testado) 🔲
-Nó único Python em `tello_ws/src/tello_inspection/tello_inspection/node.py`.
-Builda sem erros (`colcon build` limpo).
-Faz subscribe de `/image_raw` e `/odom`, salva frames + poses.csv.
-Parâmetros: `output_dir`, `trigger_dist_m`, `save_all`.
-**Ainda não testado com drone nem com bag** — próximo passo.
 
 #### 3 — RViz aberto ✅
 WSLg bug ([WARN:COPY MODE]) resolvido com `wsl --shutdown` no PowerShell.
@@ -748,9 +742,10 @@ Janelas do WSLg aparecem na barra de tarefas mas não podem ser clicadas.
 - ✅ RViz aberto
 - 🔲 Adicionar câmera + odometria no RViz
 - 🔲 Gravar ros2 bag (TEST 10)
-- 🔲 `tello_inspection` node — criado e builda, **não testado ainda**
+- 🔲 Criar e testar nó Python customizado com o bag
 
 ### Próximos passos
-1. Adicionar `/image_raw` no RViz (Add → By topic → /image_raw → Image)
-2. Gravar bag com drone voando manualmente
-3. Desenvolver `tello_inspection` node usando o bag offline
+1. Adicionar `/image_raw` e `/odom` no RViz — confirmar que todos os dados chegam
+2. Gravar ros2 bag com drone voando manualmente (TEST 10)
+3. Criar nó Python customizado que faz subscribe de `/image_raw` e `/odom`
+4. Testar o nó reproduzindo o bag offline — sem precisar ligar o drone
