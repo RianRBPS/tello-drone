@@ -717,7 +717,7 @@ Driver node ready
 ```
 
 
-#### 3 — RViz aberto ✅
+#### 2 — RViz aberto ✅
 WSLg bug ([WARN:COPY MODE]) resolvido com `wsl --shutdown` no PowerShell.
 RViz abrindo a 31 fps via WSLg.
 
