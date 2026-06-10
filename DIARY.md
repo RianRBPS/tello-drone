@@ -1012,3 +1012,91 @@ ros2 bag record -a -o ~/tello-drone/data/bags/voo_03
 - `/image_raw` Count > 0 (frames de vídeo)
 - `/camera_info` Count > 0
 - `/odom` Count > 0
+
+---
+
+## Session 8 — continuação 2 (2026-06-10)
+
+### voo_03 — /camera_info voltou, /image_raw ainda zero
+
+```
+/camera_info  Count: 16   ✅  (fix do dict funcionou)
+/battery      Count: 17   ✅
+/odom         Count: 499  ✅
+/imu          Count: 499  ✅
+/image_raw    Count: 0    ❌
+```
+
+O driver crashou novamente no `status_loop`, desta vez em:
+```
+AttributeError → msg.wifi_snr = self.tello.query_wifi_signal_noise_ratio()
+TelloException: Command 'wifi?' was unsuccessful — latest response: 'error'
+```
+
+Causa raiz: `query_wifi_signal_noise_ratio()` envia `wifi?` no canal de comandos
+(porta 8889). O Tello usa o mesmo socket UDP para TODOS os comandos — takeoff,
+land, wifi?, sdk?, sn?. Quando o status_loop manda `wifi?` ao mesmo tempo que o
+takeoff, as respostas chegam trocadas. O djitellopy lança exceção ao receber
+`'unknown command: sn?'` como resposta ao `wifi?`, crashando o thread.
+
+**Fix aplicado:** wrappei `query_wifi_signal_noise_ratio()` e o bloco `pub_id`
+(`sdk?`, `sn?`) em try/except para não crashar o thread.
+
+Também adicionei logging no video thread para diagnosticar o `/image_raw = 0`.
+
+---
+
+### voo_04 — vídeo confirmado, takeoff ainda falha
+
+```
+/image_raw    Count: 0    ❌  (ainda zero no bag)
+/camera_info  Count: 16   ✅
+/odom         Count: ~500 ✅
+```
+
+Log do Terminal 1:
+```
+[INFO] Video: first frame received, shape=(300, 400, 3)
+```
+
+**Vídeo chegando** — o thread de captura está funcionando e recebendo frames.
+O Count=0 no bag se explica: o bag recorder do Terminal 3 subscreveu `/image_raw`
+mas o driver crashou antes de publicar frames porque o `takeoff` falhou.
+
+Causa raiz confirmada: o try/except NÃO resolve o problema. O djitellopy tenta
+cada query **4 vezes** antes de lançar exceção. Durante essas 4 tentativas, os
+responses do `sdk?` e `sn?` chegam antes do response do `takeoff`, fazendo o
+`cb_takeoff` receber `'unknown command: sn?'` como resposta — TelloException →
+crash do thread principal do ROS.
+
+**Fix definitivo:**
+1. Removidos completamente `query_wifi_signal_noise_ratio()`, `query_sdk_version()`
+   e `query_serial_number()` do `status_loop`. Esses comandos não são suportados
+   no Tello standard (retornam "unknown command") e poluem o canal UDP.
+   `wifi_snr` setado para 0.0 fixo.
+2. `cb_takeoff` e `cb_land` envolvidos em try/except para não crashar o nó
+   principal caso o drone retorne erro.
+
+---
+
+### Estado após Session 8
+
+| Fix | Commit |
+|-----|--------|
+| camera_info dict → `['key']` + video thread None guard | `cdd914b` |
+| Adicionar logging diagnóstico no video thread | `45673cb` |
+| Remover wifi?/sdk?/sn? + proteger cb_takeoff/cb_land | `c54b5ee` |
+
+### Próxima sessão (voo_05)
+
+O driver deve estar estável agora. Espera-se:
+- Terminal 1 limpo: sem `wifi?`/`sdk?`/`sn?` no log
+- `Video: first frame received` logo após `Driver node ready`
+- `takeoff` e `land` respondendo sem interferência
+- `/image_raw` com Count > 0 no bag
+
+```bash
+ros2 bag record -a -o ~/tello-drone/data/bags/voo_05
+```
+
+**Pass:** `/image_raw` Count > 500 após 30–60 s de voo.
