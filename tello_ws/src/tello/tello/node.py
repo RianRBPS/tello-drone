@@ -219,16 +219,22 @@ class TelloNode():
                     msg.lowest_temperature = self.tello.get_lowest_temperature()
                     msg.temperature = self.tello.get_temperature()
 
-                    msg.wifi_snr = self.tello.query_wifi_signal_noise_ratio()
+                    try:
+                        msg.wifi_snr = self.tello.query_wifi_signal_noise_ratio()
+                    except Exception:
+                        msg.wifi_snr = 0.0
 
                     self.pub_status.publish(msg)
 
-                # Tello ID
+                # Tello ID — sdk? and sn? not supported on standard Tello
                 if self.pub_id.get_subscription_count() > 0:
-                    msg = TelloID()
-                    msg.sdk_version = self.tello.query_sdk_version()
-                    msg.serial_number = self.tello.query_serial_number()
-                    self.pub_id.publish(msg)
+                    try:
+                        msg = TelloID()
+                        msg.sdk_version = self.tello.query_sdk_version()
+                        msg.serial_number = self.tello.query_serial_number()
+                        self.pub_id.publish(msg)
+                    except Exception:
+                        pass
 
                 # Camera info
                 if self.pub_camera_info.get_subscription_count() > 0:
@@ -254,25 +260,37 @@ class TelloNode():
     def start_video_capture(self, rate=1.0/30.0):
         # Enable tello stream
         self.tello.streamon()
+        time.sleep(1.0)  # wait for stream to stabilise before opening reader
 
         # OpenCV bridge
         self.bridge = CvBridge()
 
         def video_capture_thread():
             frame_read = self.tello.get_frame_read()
+            frame_count = 0
+            none_count = 0
 
             while True:
                 frame = frame_read.frame
                 if frame is None:
+                    none_count += 1
+                    if none_count % 90 == 1:  # log every ~3 s while waiting
+                        self.node.get_logger().warn(
+                            f'Video: no frame yet (waited {none_count} ticks)')
                     time.sleep(rate)
                     continue
+                frame_count += 1
+                if frame_count == 1:
+                    self.node.get_logger().info(
+                        f'Video: first frame received, shape={frame.shape}')
                 try:
                     msg = self.bridge.cv2_to_imgmsg(numpy.array(frame), 'bgr8')
                     msg.header.stamp = self.node.get_clock().now().to_msg()
                     msg.header.frame_id = self.tf_drone
                     self.pub_image_raw.publish(msg)
                 except Exception as e:
-                    self.node.get_logger().warn(f'Video frame error: {e}')
+                    self.node.get_logger().warn(
+                        f'Video frame error: {e}', throttle_duration_sec=5.0)
                 time.sleep(rate)
                 
 
