@@ -233,13 +233,13 @@ class TelloNode():
                 # Camera info
                 if self.pub_camera_info.get_subscription_count() > 0:
                     msg = CameraInfo()
-                    msg.height = self.camera_info.image_height
-                    msg.width = self.camera_info.image_width
-                    msg.distortion_model = self.camera_info.distortion_model
-                    msg.D = self.camera_info.distortion_coefficients
-                    msg.K = self.camera_info.camera_matrix
-                    msg.R = self.camera_info.rectification_matrix
-                    msg.P = self.camera_info.projection_matrix
+                    msg.height = self.camera_info['image_height']
+                    msg.width = self.camera_info['image_width']
+                    msg.distortion_model = self.camera_info['distortion_model']
+                    msg.d = self.camera_info['distortion_coefficients']['data']
+                    msg.k = self.camera_info['camera_matrix']['data']
+                    msg.r = self.camera_info['rectification_matrix']['data']
+                    msg.p = self.camera_info['projection_matrix']['data']
                     self.pub_camera_info.publish(msg)
                 
                 # Sleep
@@ -262,14 +262,17 @@ class TelloNode():
             frame_read = self.tello.get_frame_read()
 
             while True:
-                # Get frame from drone
                 frame = frame_read.frame
-
-                # Publish opencv frame using CV bridge
-                msg = self.bridge.cv2_to_imgmsg(numpy.array(frame), 'bgr8')
-                msg.header.frame_id = self.tf_drone
-                self.pub_image_raw.publish(msg)
-
+                if frame is None:
+                    time.sleep(rate)
+                    continue
+                try:
+                    msg = self.bridge.cv2_to_imgmsg(numpy.array(frame), 'bgr8')
+                    msg.header.stamp = self.node.get_clock().now().to_msg()
+                    msg.header.frame_id = self.tf_drone
+                    self.pub_image_raw.publish(msg)
+                except Exception as e:
+                    self.node.get_logger().warn(f'Video frame error: {e}')
                 time.sleep(rate)
                 
 
