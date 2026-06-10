@@ -219,22 +219,11 @@ class TelloNode():
                     msg.lowest_temperature = self.tello.get_lowest_temperature()
                     msg.temperature = self.tello.get_temperature()
 
-                    try:
-                        msg.wifi_snr = self.tello.query_wifi_signal_noise_ratio()
-                    except Exception:
-                        msg.wifi_snr = 0.0
+                    # wifi?/sdk?/sn? are unsupported on standard Tello and
+                    # interfere with control commands — skip entirely
+                    msg.wifi_snr = 0.0
 
                     self.pub_status.publish(msg)
-
-                # Tello ID — sdk? and sn? not supported on standard Tello
-                if self.pub_id.get_subscription_count() > 0:
-                    try:
-                        msg = TelloID()
-                        msg.sdk_version = self.tello.query_sdk_version()
-                        msg.serial_number = self.tello.query_serial_number()
-                        self.pub_id.publish(msg)
-                    except Exception:
-                        pass
 
                 # Camera info
                 if self.pub_camera_info.get_subscription_count() > 0:
@@ -311,11 +300,17 @@ class TelloNode():
 
     # Drone takeoff message control
     def cb_takeoff(self, msg):
-        self.tello.takeoff()
+        try:
+            self.tello.takeoff()
+        except Exception as e:
+            self.node.get_logger().error(f'Takeoff failed: {e}')
 
     # Land the drone message callback
     def cb_land(self, msg):
-        self.tello.land()
+        try:
+            self.tello.land()
+        except Exception as e:
+            self.node.get_logger().error(f'Land failed: {e}')
 
     # Control messages received use to control the drone "analogically"
     #
