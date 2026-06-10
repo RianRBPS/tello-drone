@@ -950,3 +950,65 @@ ros2 run tello_inspection tello_inspection
 # Terminal 3 — ver frames sendo salvos
 watch -n1 'ls -1 ~/tello-drone/data/images/ | wc -l'
 ```
+
+
+---
+
+## Session 8 — continuação (2026-06-10)
+
+### O que aconteceu
+
+#### voo_01 — bag vazio
+Bag gravado antes do driver estar rodando. Apenas 7 mensagens de `/rosout`. Descartado.
+
+#### voo_02 — bag com odom/imu mas sem vídeo
+Bag gravado durante 66 s com drone voando.
+- ✅ `/odom` — 611 mensagens
+- ✅ `/imu` — 611 mensagens
+- ❌ `/image_raw` — 0 mensagens
+- ❌ `/camera_info` — 0 mensagens
+
+#### Dois bugs encontrados no driver tentone
+
+**Bug 1 — `camera_info` dict acessado como objeto (linha 236)**
+O YAML é carregado com `yaml.load()` que retorna um `dict`, mas o código tentava
+acessar `self.camera_info.image_height` (atributo) em vez de `self.camera_info['image_height']`.
+Resultado: `AttributeError` no thread `status_loop` → `/camera_info` nunca publicava.
+
+**Bug 2 — video thread crashava silenciosamente quando frame era None**
+`video_capture_thread` chamava `numpy.array(frame)` sem verificar se `frame is None`.
+Antes do primeiro frame chegar, `frame` é `None` → exceção → thread morria → `/image_raw: Count: 0`.
+Sem try/except no thread, o crash era silencioso.
+
+#### Fixes aplicados (commitados)
+
+1. `camera_info` dict access corrigido para chaves de dict:
+   ```python
+   msg.height = self.camera_info['image_height']
+   msg.d = self.camera_info['distortion_coefficients']['data']
+   # etc.
+   ```
+   Nota: campos do CameraInfo no ROS 2 são minúsculos (`d`, `k`, `r`, `p`).
+
+2. Video thread com guard para `None` + try/except:
+   ```python
+   if frame is None:
+       time.sleep(rate)
+       continue
+   try:
+       msg = self.bridge.cv2_to_imgmsg(numpy.array(frame), 'bgr8')
+       ...
+   except Exception as e:
+       self.node.get_logger().warn(f'Video frame error: {e}')
+   ```
+
+#### Próximo voo — usar voo_03
+
+```bash
+ros2 bag record -a -o ~/tello-drone/data/bags/voo_03
+```
+
+**Pass esperado:**
+- `/image_raw` Count > 0 (frames de vídeo)
+- `/camera_info` Count > 0
+- `/odom` Count > 0
