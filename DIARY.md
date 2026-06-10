@@ -798,3 +798,155 @@ Ferramentas sugeridas para gravação de tela no Windows 11:
 - 🔲 Ligar drone → **gravar tela** + gravar bag com `ros2 bag record -a` — **prioridade máxima**
 - 🔲 Compartilhar gravação de tela e bag com orientador
 - 🔲 Desenvolver e testar nó customizado reproduzindo o bag offline
+
+
+---
+
+## Session 8 — 2026-06-10
+
+### Goal
+Gravar `ros2 bag` + tela durante sessão com o drone — prioridade máxima do orientador.
+
+### Pré-sessão (feito agora, sem drone)
+- ✅ Workspace buildou limpo: 12 packages, 0 erros
+- ✅ Diretório `data/bags/` criado
+- ✅ Comandos da sessão validados abaixo
+
+---
+
+### Protocolo de gravação — executar nesta ordem
+
+#### PASSO 0 — Antes de ligar o drone (Windows)
+
+1. **Fechar Mullvad VPN completamente** (right-click tray → Quit)
+   - Mesmo "desconectado" bloqueia UDP do Tello
+2. **Iniciar gravação de tela** com Xbox Game Bar: `Win + G` → botão gravar (●)
+   - Gravar a tela INTEIRA ou ao menos o terminal WSL
+   - Manter gravando até o final do voo
+
+#### PASSO 1 — Preparar WSL (terminal único)
+
+```bash
+pkill -9 -f "ros2 daemon" ; sleep 2 ; ros2 daemon start
+source /opt/ros/humble/setup.bash
+source ~/tello-drone/tello_ws/install/setup.bash
+```
+
+#### PASSO 2 — Ligar drone + conectar WiFi
+
+1. Ligar o Tello (botão na lateral — 1 bip + LED piscando)
+2. Conectar WiFi Windows à rede `TELLO-XXXXXX`
+3. Confirmar conectividade:
+
+```bash
+ping 192.168.10.1 -c 3
+```
+
+#### PASSO 3 — Terminal 1: driver tentone
+
+```bash
+ros2 run tello tello
+```
+
+Aguardar as mensagens:
+```
+Response command: 'ok'
+Connected to drone
+Response streamon: 'ok'
+Driver node ready
+```
+
+#### PASSO 4 — Terminal 2: confirmar tópicos e bateria
+
+```bash
+ros2 topic list
+ros2 topic hz /image_raw      # deve mostrar ~30 Hz
+ros2 topic hz /odom           # deve mostrar ~10 Hz
+ros2 topic echo /battery_state --once   # confirmar bat > 20%
+```
+
+**Passe:** `/image_raw` e `/odom` publicando, bat > 20%.
+
+#### PASSO 5 — Terminal 3: iniciar gravação do bag
+
+```bash
+ros2 bag record -a -o ~/tello-drone/data/bags/voo_01
+```
+
+Deve aparecer:
+```
+[rosbag2_recorder]: Listening for topics...
+[rosbag2_recorder]: Subscribed to topic '/image_raw'
+[rosbag2_recorder]: Subscribed to topic '/odom'
+...
+```
+
+Não fechar este terminal até terminar o voo.
+
+#### PASSO 6 — Terminal 4: decolar e voar
+
+```bash
+# Decolar
+ros2 topic pub /takeoff std_msgs/msg/Empty '{}' --once
+
+# Após voo manual de 30–60 s cobrindo a área de inspeção:
+
+# Pousar
+ros2 topic pub /land std_msgs/msg/Empty '{}' --once
+```
+
+Mover o drone devagar (1–2 m/s) com a câmera apontando para a superfície alvo.
+Mínimo: 30 s de voo com overlap entre posições.
+
+#### PASSO 7 — Parar gravação e verificar
+
+```bash
+# No Terminal 3: Ctrl-C para parar o bag
+
+ros2 bag info ~/tello-drone/data/bags/voo_01
+```
+
+**Passe:** bag com `/image_raw` + `/odom` + `/camera_info`. Tamanho esperado: 50–150 MB.
+
+#### PASSO 8 — Parar gravação de tela
+
+- Xbox Game Bar: `Win + G` → botão parar (■)
+- Vídeo salvo em `%USERPROFILE%\Videos\Captures\`
+
+---
+
+### Checklist rápido
+
+```
+[ ] VPN fechada
+[ ] Tela gravando (Win+G)
+[ ] WSL daemon reiniciado
+[ ] WiFi → TELLO-XXXXXX
+[ ] ping 192.168.10.1 ok
+[ ] ros2 run tello tello → "Driver node ready"
+[ ] /image_raw hz ~30
+[ ] /odom hz ~10
+[ ] bat > 20%
+[ ] ros2 bag record -a rodando
+[ ] Decolagem ok
+[ ] Voo 30–60 s
+[ ] Pouso ok
+[ ] Ctrl-C no bag
+[ ] ros2 bag info ok
+[ ] Gravação de tela parada
+```
+
+---
+
+### Pós-sessão — Reproduzir offline (sem drone)
+
+```bash
+# Terminal 1 — reproduz o bag em loop
+ros2 bag play ~/tello-drone/data/bags/voo_01 --loop
+
+# Terminal 2 — nó de inspeção recebe dados como se fosse ao vivo
+ros2 run tello_inspection tello_inspection
+
+# Terminal 3 — ver frames sendo salvos
+watch -n1 'ls -1 ~/tello-drone/data/images/ | wc -l'
+```
