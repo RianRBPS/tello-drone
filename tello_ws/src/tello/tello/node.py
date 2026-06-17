@@ -219,27 +219,22 @@ class TelloNode():
                     msg.lowest_temperature = self.tello.get_lowest_temperature()
                     msg.temperature = self.tello.get_temperature()
 
-                    msg.wifi_snr = self.tello.query_wifi_signal_noise_ratio()
+                    # wifi?/sdk?/sn? are unsupported on standard Tello and
+                    # interfere with control commands — skip entirely
+                    msg.wifi_snr = 0.0
 
                     self.pub_status.publish(msg)
-
-                # Tello ID
-                if self.pub_id.get_subscription_count() > 0:
-                    msg = TelloID()
-                    msg.sdk_version = self.tello.query_sdk_version()
-                    msg.serial_number = self.tello.query_serial_number()
-                    self.pub_id.publish(msg)
 
                 # Camera info
                 if self.pub_camera_info.get_subscription_count() > 0:
                     msg = CameraInfo()
-                    msg.height = self.camera_info.image_height
-                    msg.width = self.camera_info.image_width
-                    msg.distortion_model = self.camera_info.distortion_model
-                    msg.D = self.camera_info.distortion_coefficients
-                    msg.K = self.camera_info.camera_matrix
-                    msg.R = self.camera_info.rectification_matrix
-                    msg.P = self.camera_info.projection_matrix
+                    msg.height = self.camera_info['image_height']
+                    msg.width = self.camera_info['image_width']
+                    msg.distortion_model = self.camera_info['distortion_model']
+                    msg.d = self.camera_info['distortion_coefficients']['data']
+                    msg.k = self.camera_info['camera_matrix']['data']
+                    msg.r = self.camera_info['rectification_matrix']['data']
+                    msg.p = self.camera_info['projection_matrix']['data']
                     self.pub_camera_info.publish(msg)
                 
                 # Sleep
@@ -254,22 +249,37 @@ class TelloNode():
     def start_video_capture(self, rate=1.0/30.0):
         # Enable tello stream
         self.tello.streamon()
+        time.sleep(1.0)  # wait for stream to stabilise before opening reader
 
         # OpenCV bridge
         self.bridge = CvBridge()
 
         def video_capture_thread():
             frame_read = self.tello.get_frame_read()
+            frame_count = 0
+            none_count = 0
 
             while True:
-                # Get frame from drone
                 frame = frame_read.frame
-
-                # Publish opencv frame using CV bridge
-                msg = self.bridge.cv2_to_imgmsg(numpy.array(frame), 'bgr8')
-                msg.header.frame_id = self.tf_drone
-                self.pub_image_raw.publish(msg)
-
+                if frame is None:
+                    none_count += 1
+                    if none_count % 90 == 1:  # log every ~3 s while waiting
+                        self.node.get_logger().warn(
+                            f'Video: no frame yet (waited {none_count} ticks)')
+                    time.sleep(rate)
+                    continue
+                frame_count += 1
+                if frame_count == 1:
+                    self.node.get_logger().info(
+                        f'Video: first frame received, shape={frame.shape}')
+                try:
+                    msg = self.bridge.cv2_to_imgmsg(numpy.array(frame), 'bgr8')
+                    msg.header.stamp = self.node.get_clock().now().to_msg()
+                    msg.header.frame_id = self.tf_drone
+                    self.pub_image_raw.publish(msg)
+                except Exception as e:
+                    self.node.get_logger().warn(
+                        f'Video frame error: {e}', throttle_duration_sec=5.0)
                 time.sleep(rate)
                 
 
@@ -290,11 +300,17 @@ class TelloNode():
 
     # Drone takeoff message control
     def cb_takeoff(self, msg):
-        self.tello.takeoff()
+        try:
+            self.tello.takeoff()
+        except Exception as e:
+            self.node.get_logger().error(f'Takeoff failed: {e}')
 
     # Land the drone message callback
     def cb_land(self, msg):
-        self.tello.land()
+        try:
+            self.tello.land()
+        except Exception as e:
+            self.node.get_logger().error(f'Land failed: {e}')
 
     # Control messages received use to control the drone "analogically"
     #

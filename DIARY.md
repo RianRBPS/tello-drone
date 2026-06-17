@@ -798,3 +798,305 @@ Ferramentas sugeridas para gravação de tela no Windows 11:
 - 🔲 Ligar drone → **gravar tela** + gravar bag com `ros2 bag record -a` — **prioridade máxima**
 - 🔲 Compartilhar gravação de tela e bag com orientador
 - 🔲 Desenvolver e testar nó customizado reproduzindo o bag offline
+
+
+---
+
+## Session 8 — 2026-06-10
+
+### Goal
+Gravar `ros2 bag` + tela durante sessão com o drone — prioridade máxima do orientador.
+
+### Pré-sessão (feito agora, sem drone)
+- ✅ Workspace buildou limpo: 12 packages, 0 erros
+- ✅ Diretório `data/bags/` criado
+- ✅ Comandos da sessão validados abaixo
+
+---
+
+### Protocolo de gravação — executar nesta ordem
+
+#### PASSO 0 — Antes de ligar o drone (Windows)
+
+1. **Fechar Mullvad VPN completamente** (right-click tray → Quit)
+   - Mesmo "desconectado" bloqueia UDP do Tello
+2. **Iniciar gravação de tela** com Xbox Game Bar: `Win + G` → botão gravar (●)
+   - Gravar a tela INTEIRA ou ao menos o terminal WSL
+   - Manter gravando até o final do voo
+
+#### PASSO 1 — Preparar WSL (terminal único)
+
+```bash
+pkill -9 -f "ros2 daemon" ; sleep 2 ; ros2 daemon start
+source /opt/ros/humble/setup.bash
+source ~/tello-drone/tello_ws/install/setup.bash
+```
+
+#### PASSO 2 — Ligar drone + conectar WiFi
+
+1. Ligar o Tello (botão na lateral — 1 bip + LED piscando)
+2. Conectar WiFi Windows à rede `TELLO-XXXXXX`
+3. Confirmar conectividade:
+
+```bash
+ping 192.168.10.1 -c 3
+```
+
+#### PASSO 3 — Terminal 1: driver tentone
+
+```bash
+ros2 run tello tello
+```
+
+Aguardar as mensagens:
+```
+Response command: 'ok'
+Connected to drone
+Response streamon: 'ok'
+Driver node ready
+```
+
+#### PASSO 4 — Terminal 2: confirmar tópicos e bateria
+
+```bash
+ros2 topic list
+ros2 topic hz /image_raw      # deve mostrar ~30 Hz
+ros2 topic hz /odom           # deve mostrar ~10 Hz
+ros2 topic echo /battery_state --once   # confirmar bat > 20%
+```
+
+**Passe:** `/image_raw` e `/odom` publicando, bat > 20%.
+
+#### PASSO 5 — Terminal 3: iniciar gravação do bag
+
+```bash
+ros2 bag record -a -o ~/tello-drone/data/bags/voo_01
+```
+
+Deve aparecer:
+```
+[rosbag2_recorder]: Listening for topics...
+[rosbag2_recorder]: Subscribed to topic '/image_raw'
+[rosbag2_recorder]: Subscribed to topic '/odom'
+...
+```
+
+Não fechar este terminal até terminar o voo.
+
+#### PASSO 6 — Terminal 4: decolar e voar
+
+```bash
+# Decolar
+ros2 topic pub /takeoff std_msgs/msg/Empty '{}' --once
+
+# Após voo manual de 30–60 s cobrindo a área de inspeção:
+
+# Pousar
+ros2 topic pub /land std_msgs/msg/Empty '{}' --once
+```
+
+Mover o drone devagar (1–2 m/s) com a câmera apontando para a superfície alvo.
+Mínimo: 30 s de voo com overlap entre posições.
+
+#### PASSO 7 — Parar gravação e verificar
+
+```bash
+# No Terminal 3: Ctrl-C para parar o bag
+
+ros2 bag info ~/tello-drone/data/bags/voo_01
+```
+
+**Passe:** bag com `/image_raw` + `/odom` + `/camera_info`. Tamanho esperado: 50–150 MB.
+
+#### PASSO 8 — Parar gravação de tela
+
+- Xbox Game Bar: `Win + G` → botão parar (■)
+- Vídeo salvo em `%USERPROFILE%\Videos\Captures\`
+
+---
+
+### Checklist rápido
+
+```
+[ ] VPN fechada
+[ ] Tela gravando (Win+G)
+[ ] WSL daemon reiniciado
+[ ] WiFi → TELLO-XXXXXX
+[ ] ping 192.168.10.1 ok
+[ ] ros2 run tello tello → "Driver node ready"
+[ ] /image_raw hz ~30
+[ ] /odom hz ~10
+[ ] bat > 20%
+[ ] ros2 bag record -a rodando
+[ ] Decolagem ok
+[ ] Voo 30–60 s
+[ ] Pouso ok
+[ ] Ctrl-C no bag
+[ ] ros2 bag info ok
+[ ] Gravação de tela parada
+```
+
+---
+
+### Pós-sessão — Reproduzir offline (sem drone)
+
+```bash
+# Terminal 1 — reproduz o bag em loop
+ros2 bag play ~/tello-drone/data/bags/voo_01 --loop
+
+# Terminal 2 — nó de inspeção recebe dados como se fosse ao vivo
+ros2 run tello_inspection tello_inspection
+
+# Terminal 3 — ver frames sendo salvos
+watch -n1 'ls -1 ~/tello-drone/data/images/ | wc -l'
+```
+
+
+---
+
+## Session 8 — continuação (2026-06-10)
+
+### O que aconteceu
+
+#### voo_01 — bag vazio
+Bag gravado antes do driver estar rodando. Apenas 7 mensagens de `/rosout`. Descartado.
+
+#### voo_02 — bag com odom/imu mas sem vídeo
+Bag gravado durante 66 s com drone voando.
+- ✅ `/odom` — 611 mensagens
+- ✅ `/imu` — 611 mensagens
+- ❌ `/image_raw` — 0 mensagens
+- ❌ `/camera_info` — 0 mensagens
+
+#### Dois bugs encontrados no driver tentone
+
+**Bug 1 — `camera_info` dict acessado como objeto (linha 236)**
+O YAML é carregado com `yaml.load()` que retorna um `dict`, mas o código tentava
+acessar `self.camera_info.image_height` (atributo) em vez de `self.camera_info['image_height']`.
+Resultado: `AttributeError` no thread `status_loop` → `/camera_info` nunca publicava.
+
+**Bug 2 — video thread crashava silenciosamente quando frame era None**
+`video_capture_thread` chamava `numpy.array(frame)` sem verificar se `frame is None`.
+Antes do primeiro frame chegar, `frame` é `None` → exceção → thread morria → `/image_raw: Count: 0`.
+Sem try/except no thread, o crash era silencioso.
+
+#### Fixes aplicados (commitados)
+
+1. `camera_info` dict access corrigido para chaves de dict:
+   ```python
+   msg.height = self.camera_info['image_height']
+   msg.d = self.camera_info['distortion_coefficients']['data']
+   # etc.
+   ```
+   Nota: campos do CameraInfo no ROS 2 são minúsculos (`d`, `k`, `r`, `p`).
+
+2. Video thread com guard para `None` + try/except:
+   ```python
+   if frame is None:
+       time.sleep(rate)
+       continue
+   try:
+       msg = self.bridge.cv2_to_imgmsg(numpy.array(frame), 'bgr8')
+       ...
+   except Exception as e:
+       self.node.get_logger().warn(f'Video frame error: {e}')
+   ```
+
+#### Próximo voo — usar voo_03
+
+```bash
+ros2 bag record -a -o ~/tello-drone/data/bags/voo_03
+```
+
+**Pass esperado:**
+- `/image_raw` Count > 0 (frames de vídeo)
+- `/camera_info` Count > 0
+- `/odom` Count > 0
+
+---
+
+## Session 8 — continuação 2 (2026-06-10)
+
+### voo_03 — /camera_info voltou, /image_raw ainda zero
+
+```
+/camera_info  Count: 16   ✅  (fix do dict funcionou)
+/battery      Count: 17   ✅
+/odom         Count: 499  ✅
+/imu          Count: 499  ✅
+/image_raw    Count: 0    ❌
+```
+
+O driver crashou novamente no `status_loop`, desta vez em:
+```
+AttributeError → msg.wifi_snr = self.tello.query_wifi_signal_noise_ratio()
+TelloException: Command 'wifi?' was unsuccessful — latest response: 'error'
+```
+
+Causa raiz: `query_wifi_signal_noise_ratio()` envia `wifi?` no canal de comandos
+(porta 8889). O Tello usa o mesmo socket UDP para TODOS os comandos — takeoff,
+land, wifi?, sdk?, sn?. Quando o status_loop manda `wifi?` ao mesmo tempo que o
+takeoff, as respostas chegam trocadas. O djitellopy lança exceção ao receber
+`'unknown command: sn?'` como resposta ao `wifi?`, crashando o thread.
+
+**Fix aplicado:** wrappei `query_wifi_signal_noise_ratio()` e o bloco `pub_id`
+(`sdk?`, `sn?`) em try/except para não crashar o thread.
+
+Também adicionei logging no video thread para diagnosticar o `/image_raw = 0`.
+
+---
+
+### voo_04 — vídeo confirmado, takeoff ainda falha
+
+```
+/image_raw    Count: 0    ❌  (ainda zero no bag)
+/camera_info  Count: 16   ✅
+/odom         Count: ~500 ✅
+```
+
+Log do Terminal 1:
+```
+[INFO] Video: first frame received, shape=(300, 400, 3)
+```
+
+**Vídeo chegando** — o thread de captura está funcionando e recebendo frames.
+O Count=0 no bag se explica: o bag recorder do Terminal 3 subscreveu `/image_raw`
+mas o driver crashou antes de publicar frames porque o `takeoff` falhou.
+
+Causa raiz confirmada: o try/except NÃO resolve o problema. O djitellopy tenta
+cada query **4 vezes** antes de lançar exceção. Durante essas 4 tentativas, os
+responses do `sdk?` e `sn?` chegam antes do response do `takeoff`, fazendo o
+`cb_takeoff` receber `'unknown command: sn?'` como resposta — TelloException →
+crash do thread principal do ROS.
+
+**Fix definitivo:**
+1. Removidos completamente `query_wifi_signal_noise_ratio()`, `query_sdk_version()`
+   e `query_serial_number()` do `status_loop`. Esses comandos não são suportados
+   no Tello standard (retornam "unknown command") e poluem o canal UDP.
+   `wifi_snr` setado para 0.0 fixo.
+2. `cb_takeoff` e `cb_land` envolvidos em try/except para não crashar o nó
+   principal caso o drone retorne erro.
+
+---
+
+### Estado após Session 8
+
+| Fix | Commit |
+|-----|--------|
+| camera_info dict → `['key']` + video thread None guard | `cdd914b` |
+| Adicionar logging diagnóstico no video thread | `45673cb` |
+| Remover wifi?/sdk?/sn? + proteger cb_takeoff/cb_land | `c54b5ee` |
+
+### Próxima sessão (voo_05)
+
+O driver deve estar estável agora. Espera-se:
+- Terminal 1 limpo: sem `wifi?`/`sdk?`/`sn?` no log
+- `Video: first frame received` logo após `Driver node ready`
+- `takeoff` e `land` respondendo sem interferência
+- `/image_raw` com Count > 0 no bag
+
+```bash
+ros2 bag record -a -o ~/tello-drone/data/bags/voo_05
+```
+
+**Pass:** `/image_raw` Count > 500 após 30–60 s de voo.
