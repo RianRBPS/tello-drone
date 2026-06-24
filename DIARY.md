@@ -1100,3 +1100,117 @@ ros2 bag record -a -o ~/tello-drone/data/bags/voo_05
 ```
 
 **Pass:** `/image_raw` Count > 500 após 30–60 s de voo.
+
+---
+
+## Orientador — Feedback 2026-06-17
+
+### Investigar por que sn?, sdk?, wifi? não são atendidos
+
+O orientador levantou a questão sobre a raiz do problema com os comandos de query
+(`sn?`, `sdk?`, `wifi?`) que retornam `'unknown command'` no Tello.
+
+**Hipótese principal: problema de convergência/timing**
+
+Os comandos de query e os comandos de voo (`takeoff`, `land`, `streamon`) são
+enviados pelo mesmo socket UDP (porta 8889). A hipótese é que existe uma janela
+de tempo logo após a conexão onde o Tello ainda está inicializando internamente
+e não consegue processar queries simultâneas — as respostas chegam "trocadas" ou
+atrasadas, causando o `'unknown command'`.
+
+Isso pode ser:
+- **Timing**: queries enviadas cedo demais antes do drone estar pronto
+- **Convergência**: múltiplos comandos no mesmo socket sem esperar resposta anterior
+- **Firmware**: o Tello EDU / standard não suporta esses comandos (diferença de modelo)
+
+**Ação definida pelo orientador:**
+- 🔲 Investigar se o problema é de timing (adicionar delay entre queries) ou se o
+  firmware do Tello simplesmente não suporta `sn?`/`sdk?`/`wifi?`
+- 🔲 Verificar modelo do drone (Tello vs Tello EDU) e compatibilidade de comandos
+- 🔲 Documentar a causa raiz encontrada
+
+---
+
+## Session 9 — 2026-06-24
+
+### Goal
+Gravar voo_05 com `/image_raw` funcionando — primeiro bag completo com vídeo.
+
+### O que foi feito
+
+#### Bug fix: `msg.wifi_snr = 0.0` → `''` ✅
+O campo `wifi_snr` do `TelloStatus` espera `str`, não `float`.
+O `status_loop` crashava logo após o "Driver node ready" com:
+```
+AssertionError: The 'wifi_snr' field must be of type 'str'
+```
+Fix: `msg.wifi_snr = ''`
+
+#### voo_05 — wifi_snr fix validado, /image_raw ainda Count: 1
+Com o fix aplicado, o Terminal 1 ficou limpo (sem Exception).
+Drone decolou, voou ~18 s e pousou sozinho (comportamento normal do SDK — Tello
+pousa automaticamente se não receber comandos RC em ~15 s).
+
+```
+/image_raw    Count: 1    ❌
+/camera_info  Count: 61   ✅
+/status       Count: 61   ✅
+/odom         Count: 276  ✅
+/imu          Count: 276  ✅
+```
+
+#### voo_06 — diagnóstico do /image_raw
+
+Aumentado publisher queue depth de 1 → 10 e adicionado log de contagem
+(`Video: published N frames` a cada 30 frames). Driver publicando ~28 fps internamente.
+
+Diagnóstico com `ros2 topic hz`:
+- `ros2 topic list | grep image` → **nada retornado** ❌
+- `ros2 topic hz /odom` → **9.9 Hz** ✅
+- `ros2 topic hz /image_raw` → **nada** ❌
+
+Causa raiz confirmada: **CycloneDDS não entrega mensagens grandes (~345 KB) no WSL2**.
+Mensagens pequenas (odom, imu) funcionam perfeitamente. O `/image_raw` não aparece
+sequer no `ros2 topic list` enquanto o driver está publicando 28 fps internamente.
+
+#### Tentativas de fix — CycloneDDS
+
+**Tentativa 1: MaxMessageSize + FragmentSize + SocketBufferSize**
+Adicionado ao `~/.cyclonedds.xml`:
+```xml
+<MaxMessageSize>10MB</MaxMessageSize>
+<FragmentSize>63000B</FragmentSize>
+<SocketReceiveBufferSize min="10MB"/>
+<SocketSendBufferSize min="10MB"/>
+```
+Resultado: nó não sobe — `SocketReceiveBufferSize` exige kernel buffer de 10 MB
+mas o limite atual é 416 KB.
+
+**Tentativa 2: sysctl + XML corrigido**
+```bash
+sudo sysctl -w net.core.rmem_max=26214400
+sudo sysctl -w net.core.wmem_max=26214400
+```
+XML sem SocketBufferSize, FragmentSize e MaxMessageSize em `<General>`:
+Resultado: `ddsi_udp_conn_write failed with retcode -58` (ENOBUFS) em cada
+frame assim que um subscriber conecta. Frames aparecem no Terminal 1 mas não
+chegam ao subscriber.
+
+**Tentativa 3: QoS BEST_EFFORT + MaxMessageSize sem FragmentSize**
+Publisher de `/image_raw` mudado para BEST_EFFORT + depth=1.
+Resultado: mesmo erro `-58` (daemon não reiniciou corretamente entre tentativas).
+
+### Estado atual
+- ✅ Driver estável: sem crash no status_loop, sem queries sn?/sdk?/wifi?
+- ✅ Vídeo chegando internamente: `Video: published N frames` confirmado
+- ❌ `/image_raw` não atravessa o DDS para outros nós (CycloneDDS + WSL2)
+- 🔲 Próximo fix: migrar para **FastDDS** (`rmw_fastrtps_cpp`) que lida melhor
+  com mensagens grandes em loopback no WSL2
+
+### Fixes commitados esta sessão
+| Fix | Arquivo |
+|-----|---------|
+| `wifi_snr = ''` (era `0.0`, tipo errado) | `src/tello/tello/node.py` |
+| Publisher `/image_raw` → BEST_EFFORT QoS | `src/tello/tello/node.py` |
+| Log `Video: published N frames` a cada 30 | `src/tello/tello/node.py` |
+| CycloneDDS: `MaxMessageSize=10MB` | `~/.cyclonedds.xml` |

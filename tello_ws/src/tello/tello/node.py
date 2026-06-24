@@ -15,6 +15,7 @@ import yaml
 from djitellopy import Tello
 
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 from tello_msg.msg import TelloStatus, TelloID, TelloWifiConfig
 from std_msgs.msg import Empty, UInt8, UInt8, Bool, String
 from sensor_msgs.msg import Image, Imu, BatteryState, Temperature, CameraInfo
@@ -22,6 +23,13 @@ from geometry_msgs.msg import Twist, TransformStamped
 from nav_msgs.msg import Odometry
 from cv_bridge import CvBridge
 import ament_index_python
+
+# BEST_EFFORT + depth 1: ideal for video — no retransmissions, no backlog on new subscriber
+_IMAGE_QOS = QoSProfile(
+    reliability=QoSReliabilityPolicy.BEST_EFFORT,
+    history=QoSHistoryPolicy.KEEP_LAST,
+    depth=1
+)
 
 # Tello ROS node class, inherits from the Tello controller object.
 #
@@ -85,8 +93,8 @@ class TelloNode():
 
     # Setup ROS publishers of the node.
     def setup_publishers(self):
-        self.pub_image_raw = self.node.create_publisher(Image, 'image_raw', 1)
-        self.pub_camera_info = self.node.create_publisher(CameraInfo, 'camera_info', 1)
+        self.pub_image_raw = self.node.create_publisher(Image, 'image_raw', _IMAGE_QOS)
+        self.pub_camera_info = self.node.create_publisher(CameraInfo, 'camera_info', 10)
         self.pub_status = self.node.create_publisher(TelloStatus, 'status', 1)
         self.pub_id = self.node.create_publisher(TelloID, 'id', 1)
         self.pub_imu = self.node.create_publisher(Imu, 'imu', 1)
@@ -221,7 +229,7 @@ class TelloNode():
 
                     # wifi?/sdk?/sn? are unsupported on standard Tello and
                     # interfere with control commands — skip entirely
-                    msg.wifi_snr = 0.0
+                    msg.wifi_snr = ''
 
                     self.pub_status.publish(msg)
 
@@ -277,6 +285,9 @@ class TelloNode():
                     msg.header.stamp = self.node.get_clock().now().to_msg()
                     msg.header.frame_id = self.tf_drone
                     self.pub_image_raw.publish(msg)
+                    if frame_count % 30 == 0:
+                        self.node.get_logger().info(
+                            f'Video: published {frame_count} frames')
                 except Exception as e:
                     self.node.get_logger().warn(
                         f'Video frame error: {e}', throttle_duration_sec=5.0)
