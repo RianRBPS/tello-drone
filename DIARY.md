@@ -1214,3 +1214,49 @@ Resultado: mesmo erro `-58` (daemon não reiniciou corretamente entre tentativas
 | Publisher `/image_raw` → BEST_EFFORT QoS | `src/tello/tello/node.py` |
 | Log `Video: published N frames` a cada 30 | `src/tello/tello/node.py` |
 | CycloneDDS: `MaxMessageSize=10MB` | `~/.cyclonedds.xml` |
+
+---
+
+## Orientador — Feedback 2026-06-24
+
+### Imagem via nodelet — transitar ponteiro, não dados
+
+O orientador explicou que para evitar copiar 352 KB de imagem a cada frame pelo
+DDS, a abordagem correta em ROS 2 é usar **nós compostos (composable nodes)**,
+equivalente ao conceito de nodelet do ROS 1.
+
+Quando o driver e o nó de inspeção rodam no **mesmo processo**, o ROS 2 pode
+transitar apenas o **ponteiro** para onde a imagem está na memória — sem
+serializar, sem copiar os bytes, sem passar pelo DDS. Isso elimina o problema
+de fragmentação de mensagens grandes no WSL2.
+
+Fluxo com zero-copy:
+```
+driver (publica /image_raw) ──ponteiro──► tello_inspection (subscreve)
+                         mesmo processo
+```
+
+Fluxo atual (problema):
+```
+driver ──352 KB serializado──► DDS ──UDP fragmentado──► bag/image_view
+                         processos separados
+```
+
+### Tentar image_view como diagnóstico
+
+Antes de implementar nodelets, o orientador sugeriu testar com a ferramenta
+**`image_view`** do ROS para verificar se o problema é no DDS ou na visualização:
+
+```bash
+ros2 run image_view image_view --ros-args --remap /image_raw:=/image_raw
+```
+
+Esta é uma abordagem diferente do `ros2 topic hz` — o `image_view` abre uma
+janela gráfica mostrando o feed da câmera. Se funcionar, confirma que o
+`/image_raw` está chegando corretamente.
+
+### Ações definidas
+- 🔲 Testar `ros2 run image_view image_view` enquanto o driver está rodando
+- 🔲 Se image_view funcionar → problema era só na visualização anterior
+- 🔲 Se image_view não funcionar → investigar nodelets/composable nodes para
+  transitar ponteiro em vez de dados e eliminar o gargalo do DDS
