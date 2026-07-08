@@ -1556,6 +1556,8 @@ default no diretório atual (`/mnt/c/Users/riris`). Movido e renomeado para
 - `stitch_mosaic.py` nos 14 frames → **`data/mosaic_voo09_sweep.png`,
   3971×1285 px** (~4 frames de largura) ✅
 
+![Mosaico voo_09 — varredura da sala](docs/screenshots/mosaic_voo09_sweep.jpg)
+
 ### Qualidade (primeira tentativa)
 - Ghosting onde a pessoa se moveu entre frames (esperado — cena precisa ser estática)
 - Seams visíveis e wobble de perspectiva (yaw + translação misturados)
@@ -1585,6 +1587,12 @@ durante a varredura.
   suaves. O stitcher descartou sozinho os frames sem textura (portas de
   armário lisas, cortina) — confirmação prática de que superfície precisa
   de textura para feature matching.
+
+![Mosaico voo_11 — sem ghosting](docs/screenshots/mosaic_voo11_sweep.jpg)
+
+Contact sheet do voo completo (107 frames, 1 por 2 s de voo):
+
+![Contact sheet voo_11](docs/screenshots/contact_sheet_voo11.jpg)
 
 ### Comparação voo_09 → voo_11
 | | voo_09 | voo_11 |
