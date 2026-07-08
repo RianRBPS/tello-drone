@@ -1431,3 +1431,58 @@ ros2 run rqt_image_view rqt_image_view
 2. Adaptar `mosaic_capture` para subscrever `/image_raw/compressed` (CompressedImage → cv2.imdecode)
 3. Rodar mosaic_capture + stitch_mosaic com o bag em loop (TESTs 7–8 offline)
 4. Investigar resolução 400×300
+
+---
+
+## Session 10 — TESTs 7–8 OFFLINE ✅ (2026-07-07, sem drone)
+
+### Pipeline completo validado contra o bag voo_08
+
+```
+ros2 bag play voo_08 → mosaic_capture → 33 frames 960×720 + poses.csv
+                     → stitch_mosaic.py → data/mosaic_voo08.png ✅
+```
+
+Nenhum drone ligado. Este é o fluxo de desenvolvimento daqui pra frente.
+
+### mosaic_capture adaptado (rebuildado ✅)
+
+- Subscreve **`/image_raw/compressed`** (CompressedImage → `cv2.imdecode`);
+  não depende mais do cv_bridge
+- **Trigger por tempo** (`trigger_period`, default 2.0 s) — necessário porque
+  o `/odom` do driver tentone **não tem posição** (sempre 0,0,0 — só publica
+  orientação e velocidade), então o trigger por distância nunca dispararia
+- Novos parâmetros: `image_topic`, `odom_topic`, `trigger_period`
+- Trigger por distância mantido para quando houver odometria real (rtabmap)
+
+### Comando do teste
+
+```bash
+# Terminal 1
+source ~/tello-drone/scripts/ros_env.sh
+ros2 bag play ~/tello-drone/data/bags/voo_08 --loop
+
+# Terminal 2
+source ~/tello-drone/scripts/ros_env.sh
+ros2 run mosaic_capture mosaic_capture --ros-args -p output_dir:=$HOME/tello-drone/data/images_voo08
+
+# Depois (sem ROS)
+python3 scripts/stitch_mosaic.py --images ~/tello-drone/data/images_voo08 --output ~/tello-drone/data/mosaic_voo08.png
+```
+
+### Descobertas
+
+- ✅ **Mistério da resolução resolvido:** os frames do bag são 960×720. O
+  `shape=(300, 400, 3)` no log do driver era só o primeiro frame de warm-up
+  do djitellopy — depois vira resolução cheia. Nada a corrigir.
+- O mosaico saiu 961×723 (≈ 1 frame): o voo_08 foi um hover — sem varredura
+  lateral não há área nova para costurar. **O pipeline funciona; falta
+  footage com movimento.**
+
+### Próximo voo (voo_09) — protocolo para um mosaico de verdade
+
+1. Superfície COM textura (piso com juntas, parede com detalhes, mesa com
+   objetos — evitar superfície branca lisa: feature matching precisa de textura)
+2. Após takeoff, manter vivo: `ros2 topic pub /control geometry_msgs/msg/Twist '{}' --rate 2`
+3. Varrer lateralmente devagar (~0.5 m entre posições, câmera na superfície)
+4. Bag: `ros2 bag record /image_raw/compressed /odom /imu /camera_info /status /battery -o ~/tello-drone/data/bags/voo_09`
