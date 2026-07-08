@@ -1611,3 +1611,30 @@ Contact sheet do voo completo (107 frames, 1 por 2 s de voo):
 ### Próximo — tech validation restante
 1. TEST 5 — calibração (checkerboard 8×6, 25 mm, impresso em escala 100%)
 2. rtabmap offline contra voo_11 (após calibração) — posição de verdade
+
+---
+
+## Session 11 — Fix das cores azuladas (RGB↔BGR) ✅ (2026-07-08, sem drone)
+
+### Sintoma
+Todos os mosaicos e frames saíam azulados (pele azul, porta de madeira azul).
+
+### Root cause
+O djitellopy retorna frames em **RGB**, mas o driver publicava o array direto
+como `bgr8` e codificava JPEG com `cv2.imencode` (que assume BGR) — canais
+R e B trocados em tudo que saía do driver.
+
+**Confirmação sem voo:** trocar os canais do mosaico voo_11 existente
+(`img[:, :, ::-1]`) devolveu as cores corretas (porta marrom, parede branca).
+
+### Fix aplicado
+`tello_ws/src/tello/tello/node.py` — conversão explícita antes de publicar:
+```python
+frame_bgr = cv2.cvtColor(numpy.array(frame), cv2.COLOR_RGB2BGR)
+```
+Rebuildado. A partir do voo_12 as cores são corretas na origem.
+
+### ⚠️ Bags antigos (voo_08 a voo_11)
+Os JPEGs dentro desses bags continuam com R/B trocados. Ao consumir esses
+bags, trocar canais após o decode: `img = img[:, :, ::-1]`.
+Os mosaicos e screenshots do repo já foram regenerados com cores corretas.

@@ -283,7 +283,9 @@ class TelloNode():
                     self.node.get_logger().info(
                         f'Video: first frame received, shape={frame.shape}')
                 try:
-                    frame_bgr = numpy.array(frame)
+                    # djitellopy returns RGB frames; convert so 'bgr8' and the
+                    # JPEG encoder (both BGR-based) get what they expect
+                    frame_bgr = cv2.cvtColor(numpy.array(frame), cv2.COLOR_RGB2BGR)
                     msg = self.bridge.cv2_to_imgmsg(frame_bgr, 'bgr8')
                     msg.header.stamp = self.node.get_clock().now().to_msg()
                     msg.header.frame_id = self.tf_drone
