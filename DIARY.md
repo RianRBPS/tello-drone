@@ -1486,3 +1486,47 @@ python3 scripts/stitch_mosaic.py --images ~/tello-drone/data/images_voo08 --outp
 2. Após takeoff, manter vivo: `ros2 topic pub /control geometry_msgs/msg/Twist '{}' --rate 2`
 3. Varrer lateralmente devagar (~0.5 m entre posições, câmera na superfície)
 4. Bag: `ros2 bag record /image_raw/compressed /odom /imu /camera_info /status /battery -o ~/tello-drone/data/bags/voo_09`
+
+---
+
+## Session 10 — tello_teleop criado (2026-07-07, sem drone)
+
+Novo `scripts/tello_teleop.py`: teleop de teclado com **keepalive embutido**
+(publica `/control` a 10 Hz continuamente — o Tello nunca mais pousa sozinho
+enquanto o teleop estiver aberto). Testado offline com pty fake: keepalive
+9.4 Hz idle, tecla segurada gera `linear.y=30`, solta volta a zero em 0.4 s.
+
+Teclas: `t` takeoff · `l` land · `w/s` frente/trás · `a/d` esquerda/direita ·
+`q/e` yaw · `r/f` sobe/desce · `espaço` hover · `+/-` velocidade · `x` sair.
+
+### Checklist voo_09 (substitui o protocolo anterior)
+
+```
+0. Bateria carregada, espaço livre, Mullvad fechado, WiFi → TELLO-XXXXXX
+   EM CADA TERMINAL: source ~/tello-drone/scripts/ros_env.sh
+
+1. Terminal 1:  pkill -9 -f "ros2 daemon" ; sleep 2 ; ros2 daemon start
+                ros2 run tello tello
+
+2. Terminal 2:  ros2 run rqt_image_view rqt_image_view
+                (dropdown → /image_raw/compressed — é o seu monitor de voo)
+
+3. Terminal 3:  ros2 bag record /image_raw/compressed /odom /imu /camera_info \
+                  /status /battery -o ~/tello-drone/data/bags/voo_09
+
+4. Terminal 4:  python3 ~/tello-drone/scripts/tello_teleop.py
+                t → decola (e fica no ar — keepalive ativo)
+                voar olhando o Terminal 2, não o drone
+
+5. Plano de voo (60–90 s): superfície COM textura a ~1 m
+   (piso com juntas, parede com detalhes — não superfície lisa branca)
+   varredura lateral lenta: a-a-a ... pausa ... a-a-a ... volta com d-d-d
+   overlap entre posições = essencial para o stitch
+
+6. l → pousa · x → sai do teleop · Ctrl-C no bag
+   ros2 bag info ~/tello-drone/data/bags/voo_09
+```
+
+**Pass:** bag com 60–90 s, `/image_raw/compressed` Count > 800, footage com
+varredura lateral visível. Depois, offline: mosaic_capture + stitch → mosaico
+de verdade.
