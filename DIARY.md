@@ -1530,3 +1530,41 @@ Teclas: `t` takeoff · `l` land · `w/s` frente/trás · `a/d` esquerda/direita 
 **Pass:** bag com 60–90 s, `/image_raw/compressed` Count > 800, footage com
 varredura lateral visível. Depois, offline: mosaic_capture + stitch → mosaico
 de verdade.
+
+---
+
+## Session 10 — voo_09: PRIMEIRO MOSAICO REAL ✅ (2026-07-07)
+
+### O voo
+Teleop funcionou — controle total, sem auto-land (keepalive OK). **165 s de
+voo**, o maior até agora. Bag completo:
+
+```
+/image_raw/compressed  3734 msgs (~22.6 fps)   /odom  1625   /imu  1625
+/camera_info  329   /status  329   /battery  329   — 198.7 MiB
+```
+
+⚠️ Lição: o `ros2 bag record` foi rodado **sem `-o`** — o bag caiu com nome
+default no diretório atual (`/mnt/c/Users/riris`). Movido e renomeado para
+`data/bags/voo_09` (db3 + metadata.yaml ajustados). Sempre conferir o `-o`.
+
+### Pipeline offline
+- `ros2 bag play --rate 2.0` + mosaic_capture `trigger_period:=1.0`
+  → **88 frames** (equivale a 1 captura a cada 2 s de voo)
+- Frames 10–23 = varredura contínua da sala (guarda-roupa → espelho →
+  escrivaninha → janela) — segmento usado para o stitch
+- `stitch_mosaic.py` nos 14 frames → **`data/mosaic_voo09_sweep.png`,
+  3971×1285 px** (~4 frames de largura) ✅
+
+### Qualidade (primeira tentativa)
+- Ghosting onde a pessoa se moveu entre frames (esperado — cena precisa ser estática)
+- Seams visíveis e wobble de perspectiva (yaw + translação misturados)
+- Melhoraria com: varredura só lateral (sem yaw), cena estática, mais overlap
+
+### TEST 7 ✅ e TEST 8 ✅ — completos com dados reais de voo
+
+### Próximo (tech validation restante)
+1. **TEST 5 — calibração da câmera**: imprimir checkerboard 8×6 (25 mm),
+   drone ligado em cima da mesa, `camera_calibration` — sem voar
+2. **rtabmap offline contra o bag voo_09** (depois da calibração) —
+   odometria visual com posição de verdade
