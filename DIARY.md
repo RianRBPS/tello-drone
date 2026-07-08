@@ -1380,3 +1380,54 @@ Mais seguro ainda: `wsl --shutdown` no PowerShell antes da sessão mata todos os
 shells velhos de uma vez.
 
 ### Próxima tentativa: voo_08 (mesmo protocolo, ros_env.sh em cada terminal)
+
+---
+
+## Session 10 — voo_08 ✅ PRIMEIRO BAG COMPLETO (2026-07-07)
+
+### 🎉 Milestone: TEST 10 concluído — prioridade máxima do orientador desde maio
+
+Com `scripts/ros_env.sh` em todos os 4 terminais, tudo funcionou de primeira:
+driver conectou, takeoff via `ros2 topic pub /takeoff`, drone voou, bag gravou.
+
+```
+voo_08: 75.8 s | 74.6 MiB | 3729 mensagens
+/image_raw/compressed  1784 msgs (~23.5 fps)  ← vídeo no bag, finalmente
+/odom                   746 msgs (~10 Hz)
+/imu                    746 msgs (~10 Hz)
+/camera_info /status /battery  151 msgs cada (2 Hz)
+```
+
+**Replay offline verificado:** `ros2 bag play` reproduz 23.3 Hz de vídeo e
+9.7 Hz de odom sem drone. Desenvolvimento offline desbloqueado.
+
+### Como reproduzir (sem drone, sem WiFi do Tello)
+
+```bash
+# Terminal 1
+source ~/tello-drone/scripts/ros_env.sh
+ros2 bag play ~/tello-drone/data/bags/voo_08 --loop
+
+# Terminal 2 — assistir o voo
+source ~/tello-drone/scripts/ros_env.sh
+ros2 run rqt_image_view rqt_image_view
+# clicar no botão REFRESH (setas azuis) e selecionar /image_raw/compressed
+```
+
+### Notas do voo
+
+- Drone pousou sozinho após ~15 s — comportamento padrão do SDK sem comandos RC.
+  Próximo voo, manter vivo com: `ros2 topic pub /control geometry_msgs/msg/Twist '{}' --rate 2`
+  (zera os sticks a 2 Hz; Ctrl-C antes de `/land`)
+- rqt_image_view: dropdown começa vazio — clicar no refresh antes de selecionar
+- 🔍 Investigar depois: frames chegando a 400×300 (`shape=(300, 400, 3)`) em vez
+  de 960×720 — verificar djitellopy/PyAV; para o mosaico queremos resolução cheia
+- Erro benigno na conexão: `'utf-8' codec can't decode byte 0xcc` na primeira
+  resposta — lixo no buffer UDP de sessão anterior, o retry resolveu sozinho
+
+### Próximos passos (todos offline, com o bag)
+
+1. Compartilhar voo_08 com o orientador (74 MiB — zip do diretório `data/bags/voo_08`)
+2. Adaptar `mosaic_capture` para subscrever `/image_raw/compressed` (CompressedImage → cv2.imdecode)
+3. Rodar mosaic_capture + stitch_mosaic com o bag em loop (TESTs 7–8 offline)
+4. Investigar resolução 400×300
