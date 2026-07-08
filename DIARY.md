@@ -1638,3 +1638,46 @@ Rebuildado. A partir do voo_12 as cores são corretas na origem.
 Os JPEGs dentro desses bags continuam com R/B trocados. Ao consumir esses
 bags, trocar canais após o decode: `img = img[:, :, ::-1]`.
 Os mosaicos e screenshots do repo já foram regenerados com cores corretas.
+
+---
+
+## Session 11 — voo_14: o maior e melhor voo até agora ✅ (2026-07-08)
+
+### O voo
+**372 s (6,2 min), 6288 frames de vídeo** — tour completo por uma casa:
+sala → corredor → sala de jantar → cozinha → lavanderia → **quintal** (varal,
+gramado, jardim, portão) → volta para dentro. Primeiro voo com trechos
+outdoor e primeiro com as **cores corretas na origem** (fix RGB→BGR validado
+ao vivo no rqt antes da decolagem).
+
+Confirmação ao vivo do vídeo com cores corretas — rqt_image_view com
+`/image_raw` selecionado (o drone filmando o próprio notebook que mostra a
+visão do drone):
+
+![rqt_image_view com vídeo ao vivo](docs/screenshots/rqt_image_raw_live.png)
+
+### Pipeline offline
+- 197 frames extraídos (replay 2×, 1 captura / 2 s de voo)
+
+![Contact sheet voo_14](docs/screenshots/contact_sheet_voo14.jpg)
+
+### Mosaicos
+
+**Quintal** (frames 111–135) — melhor footage até agora: luz natural, textura
+por todo lado. Geometria sólida; sun glare e manchas escuras nas emendas
+(diferenças de exposição entre frames — próximo refinamento):
+
+![Mosaico voo_14 quintal](docs/screenshots/mosaic_voo14_yard.jpg)
+
+**Sala** (frames 24–47) — panorama de 4461 px, mas o stitcher separou em
+ilhas desconexas (varredura pulou rápido demais entre áreas — lição: pausar
+mais entre posições):
+
+![Mosaico voo_14 sala](docs/screenshots/mosaic_voo14_living.jpg)
+
+### Lições do voo_14
+1. Cores corretas confirmadas ponta a ponta (rqt ao vivo → bag → mosaico)
+2. Outdoor funciona bem — textura natural é amiga do feature matching
+3. Exposição automática varia entre frames → próximo passo de qualidade é
+   exposure compensation no stitcher
+4. Varredura precisa de pausas — trechos rápidos viram ilhas desconexas

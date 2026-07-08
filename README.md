@@ -5,10 +5,14 @@ captura de frames, costura em mosaico e (em breve) detecção de defeitos.
 
 **Stack:** DJI Tello · ROS 2 Humble · WSL2 (Windows 11) · Python/OpenCV · CPU-only
 
-## Resultado atual — voo_11 (2026-07-07)
+## Resultado atual — voo_14 (2026-07-08)
 
-Mosaico costurado automaticamente a partir de uma varredura lateral de ~24 s
-(frames capturados a cada 2 s de voo, stitching por feature matching):
+Mosaico do quintal, costurado automaticamente a partir de uma varredura
+lateral (frames capturados a cada 2 s de voo, stitching por feature matching):
+
+![Mosaico voo_14 quintal](docs/screenshots/mosaic_voo14_yard.jpg)
+
+Varredura indoor (voo_11):
 
 ![Mosaico voo_11](docs/screenshots/mosaic_voo11_sweep.jpg)
 
