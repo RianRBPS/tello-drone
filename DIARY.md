@@ -1341,3 +1341,42 @@ ros2 topic pub /land std_msgs/msg/Empty '{}' --once
 ```
 
 **Pass:** `/image_raw/compressed` Count > 300 no `ros2 bag info` após 30–60 s de voo.
+
+---
+
+## Session 10 — continuação (2026-07-07, com drone)
+
+### Tentativa voo_07 — driver funcionou, mas terminais não se enxergavam
+
+**Vitória primeiro:** com o env corrigido (`unset RMW_IMPLEMENTATION CYCLONEDDS_URI`),
+o driver conectou e publicou vídeo continuamente — ~22 fps, 840+ frames sem crash.
+Primeira vez que o pipeline de vídeo roda estável de ponta a ponta.
+
+**Falha:** `ros2 topic pub /takeoff` ficou preso em "Waiting for at least 1 matching
+subscription(s)..." e o bag voo_07 gravou **0 mensagens** (deletado).
+
+### Root cause: ambientes DDS misturados entre terminais
+
+O Terminal 1 (driver) era um shell ANTIGO — aberto antes do fix do `.bashrc` —
+então tinha `unset` manual mas **sem** `ROS_LOCALHOST_ONLY=1`. Os Terminais 2/3/4
+eram novos, **com** `ROS_LOCALHOST_ONLY=1`. Confirmado sem drone com teste A/B:
+
+- Publisher SEM a flag + subscriber COM a flag → **NO MESSAGES** (o bug da sessão)
+- Ambos COM a flag → funciona
+
+Com FastDDS, um participante localhost-only anuncia locators 127.0.0.1 e o outro
+anuncia o IP da interface — o matching falha silenciosamente. **Todos os terminais
+precisam do MESMO ambiente DDS.**
+
+### Fix: scripts/ros_env.sh — ritual único por terminal
+
+```bash
+source ~/tello-drone/scripts/ros_env.sh
+```
+
+Rodar em TODO terminal WSL antes de qualquer comando ROS (conserta até terminais
+velhos). Também adicionado `unset RMW_IMPLEMENTATION CYCLONEDDS_URI` no `.bashrc`.
+Mais seguro ainda: `wsl --shutdown` no PowerShell antes da sessão mata todos os
+shells velhos de uma vez.
+
+### Próxima tentativa: voo_08 (mesmo protocolo, ros_env.sh em cada terminal)
