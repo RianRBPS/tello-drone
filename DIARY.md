@@ -1568,3 +1568,31 @@ default no diretório atual (`/mnt/c/Users/riris`). Movido e renomeado para
    drone ligado em cima da mesa, `camera_calibration` — sem voar
 2. **rtabmap offline contra o bag voo_09** (depois da calibração) —
    odometria visual com posição de verdade
+
+---
+
+## Session 10 — voo_11: mosaico limpo, sem ghosting ✅ (2026-07-07)
+
+### O voo
+191 s, 3743 frames de vídeo, todos os tópicos. (voo_10 foi descartado —
+executado incorretamente.) Desta vez com `-o` correto e piloto fora do quadro
+durante a varredura.
+
+### Pipeline offline
+- 107 frames extraídos (replay 2×, 1 captura / 2 s de voo)
+- Varredura útil: frames 38–61 (parede → porta → escrivaninha coberta)
+- **`data/mosaic_voo11_sweep.png`, 2847×1136 px — sem ghosting**, seams
+  suaves. O stitcher descartou sozinho os frames sem textura (portas de
+  armário lisas, cortina) — confirmação prática de que superfície precisa
+  de textura para feature matching.
+
+### Comparação voo_09 → voo_11
+| | voo_09 | voo_11 |
+|---|---|---|
+| Pessoa no quadro | sim → ghosting | não → limpo |
+| Movimento | yaw + translação | translação lateral |
+| Resultado | wobble visível | seams suaves |
+
+### Próximo — tech validation restante
+1. TEST 5 — calibração (checkerboard 8×6, 25 mm, impresso em escala 100%)
+2. rtabmap offline contra voo_11 (após calibração) — posição de verdade
