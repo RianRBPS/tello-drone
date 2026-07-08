@@ -1260,3 +1260,84 @@ janela gráfica mostrando o feed da câmera. Se funcionar, confirma que o
 - 🔲 Se image_view funcionar → problema era só na visualização anterior
 - 🔲 Se image_view não funcionar → investigar nodelets/composable nodes para
   transitar ponteiro em vez de dados e eliminar o gargalo do DDS
+
+---
+
+## Session 10 — 2026-07-07
+
+### Goal
+Resolver o blocker do `/image_raw` (Session 9) **sem drone** e preparar o pipeline
+de vídeo comprimido sugerido pelo feedback do orientador (2026-06-24).
+
+### Root cause DEFINITIVO do /image_raw ✅
+
+Criado um publisher fake (`scripts/fake_image_pub.py`) que publica imagem
+960×720 bgr8 (~2 MB) a 15 Hz nos mesmos tópicos/QoS do driver — reproduz o
+problema sem ligar o drone. Teste automatizado: `bash scripts/test_dds.sh`.
+
+Matriz de testes (subscriber em processo separado, `ros2 topic hz`):
+
+| Config | /ping (pequeno) | /image_raw (2 MB) | /compressed (~40 KB) |
+|---|---|---|---|
+| FastDDS default | ✅ | ✅ | ✅ |
+| CycloneDDS **sem** XML | ✅ | ✅ | ✅ |
+| CycloneDDS + `~/.cyclonedds.xml` | ✅ | ❌ ENOBUFS -58 | ❌ |
+
+**O culpado era o `~/.cyclonedds.xml`** (o `MaxMessageSize=10MB` adicionado
+durante o debug da Session 9). E o próprio XML era resquício do misdiagnóstico
+da Session 3 — o hang original era o daemon stale do ros2cli, nunca foi
+configuração de DDS. Removendo a configuração custom, tudo funciona.
+
+### Fixes aplicados
+
+1. `~/.bashrc`: removidos `RMW_IMPLEMENTATION=rmw_cyclonedds_cpp` e
+   `CYCLONEDDS_URI` → volta ao **FastDDS, o RMW default do Humble**
+   (backup em `~/.bashrc.bak-session10`)
+2. `~/.bashrc`: adicionado `export ROS_LOCALHOST_ONLY=1` — todos os nós são
+   same-host; evita DDS multicast na rede do Tello AP (erro da Session 4)
+3. `~/.cyclonedds.xml` → renomeado para `~/.cyclonedds.xml.disabled-session10`
+4. Driver tentone: novo publisher **`/image_raw/compressed`** (JPEG q80,
+   ~30–50 KB/frame) — atravessa qualquer DDS, visível no rqt_image_view,
+   e deixa os bags ~10× menores
+5. Novos scripts: `scripts/fake_image_pub.py` + `scripts/test_dds.sh`
+   (teste DDS reproduzível sem drone)
+
+### Verificação (sem drone)
+
+Ambiente novo (FastDDS default): `/image_raw` 2.1 Hz e `/image_raw/compressed`
+6.4 Hz atravessando para outro processo — limite é a CPU do publisher Python
+fake, não o DDS. Workspace rebuildado: `colcon build --packages-select tello` ✅
+
+### Feedback do orientador 2026-06-24 — como foi endereçado
+
+- **"Transita o ponteiro" (nodelet/intra-process):** rclpy não suporta
+  intra-process communication no Humble (é feature do rclcpp/composition).
+  O equivalente prático implementado: tópico comprimido (~40 KB) que não
+  sofre do problema de mensagens grandes.
+- **"ros2 run image_view":** usar `ros2 run rqt_image_view rqt_image_view`
+  e selecionar `/image_raw/compressed` no dropdown.
+
+### Próxima sessão COM drone (voo_07)
+
+```bash
+# 1. WiFi → TELLO-XXXXXX (Mullvad fechado)
+# 2. Ritual do daemon:
+pkill -9 -f "ros2 daemon" ; sleep 2 ; ros2 daemon start
+
+# 3. Terminal 1 — driver
+ros2 run tello tello
+
+# 4. Terminal 2 — ver vídeo AO VIVO (primeira vez!)
+ros2 run rqt_image_view rqt_image_view   # selecionar /image_raw/compressed
+
+# 5. Terminal 3 — bag (compressed = ~10x menor, dá pra mandar pro orientador)
+ros2 bag record /image_raw/compressed /odom /imu /camera_info /status /battery \
+  -o ~/tello-drone/data/bags/voo_07
+
+# 6. Terminal 4 — voar
+ros2 topic pub /takeoff std_msgs/msg/Empty '{}' --once
+# ... voo manual 30-60 s ...
+ros2 topic pub /land std_msgs/msg/Empty '{}' --once
+```
+
+**Pass:** `/image_raw/compressed` Count > 300 no `ros2 bag info` após 30–60 s de voo.

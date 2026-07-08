@@ -18,7 +18,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 from tello_msg.msg import TelloStatus, TelloID, TelloWifiConfig
 from std_msgs.msg import Empty, UInt8, UInt8, Bool, String
-from sensor_msgs.msg import Image, Imu, BatteryState, Temperature, CameraInfo
+from sensor_msgs.msg import Image, CompressedImage, Imu, BatteryState, Temperature, CameraInfo
 from geometry_msgs.msg import Twist, TransformStamped
 from nav_msgs.msg import Odometry
 from cv_bridge import CvBridge
@@ -94,6 +94,8 @@ class TelloNode():
     # Setup ROS publishers of the node.
     def setup_publishers(self):
         self.pub_image_raw = self.node.create_publisher(Image, 'image_raw', _IMAGE_QOS)
+        # JPEG (~30-50 KB/frame) crosses WSL2 loopback DDS where raw (~2 MB) does not
+        self.pub_image_compressed = self.node.create_publisher(CompressedImage, 'image_raw/compressed', _IMAGE_QOS)
         self.pub_camera_info = self.node.create_publisher(CameraInfo, 'camera_info', 10)
         self.pub_status = self.node.create_publisher(TelloStatus, 'status', 1)
         self.pub_id = self.node.create_publisher(TelloID, 'id', 1)
@@ -281,10 +283,21 @@ class TelloNode():
                     self.node.get_logger().info(
                         f'Video: first frame received, shape={frame.shape}')
                 try:
-                    msg = self.bridge.cv2_to_imgmsg(numpy.array(frame), 'bgr8')
+                    frame_bgr = numpy.array(frame)
+                    msg = self.bridge.cv2_to_imgmsg(frame_bgr, 'bgr8')
                     msg.header.stamp = self.node.get_clock().now().to_msg()
                     msg.header.frame_id = self.tf_drone
                     self.pub_image_raw.publish(msg)
+
+                    ok, jpeg = cv2.imencode('.jpg', frame_bgr,
+                                            [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                    if ok:
+                        cmsg = CompressedImage()
+                        cmsg.header = msg.header
+                        cmsg.format = 'jpeg'
+                        cmsg.data = jpeg.tobytes()
+                        self.pub_image_compressed.publish(cmsg)
+
                     if frame_count % 30 == 0:
                         self.node.get_logger().info(
                             f'Video: published {frame_count} frames')
