@@ -1368,6 +1368,13 @@ Com FastDDS, um participante localhost-only anuncia locators 127.0.0.1 e o outro
 anuncia o IP da interface — o matching falha silenciosamente. **Todos os terminais
 precisam do MESMO ambiente DDS.**
 
+Como o bug aparecia na prática — rqt_image_view aberto durante a sessão, com o
+driver publicando vídeo a 22 fps, mas o dropdown de tópicos **vazio** (o rqt não
+enxergava nenhum tópico do driver; o gradiente cinza é o padrão de teste do rqt,
+não vídeo):
+
+![rqt_image_view sem tópicos durante o bug de discovery](docs/screenshots/rqt_sem_topicos_discovery_bug.png)
+
 ### Fix: scripts/ros_env.sh — ritual único por terminal
 
 ```bash
